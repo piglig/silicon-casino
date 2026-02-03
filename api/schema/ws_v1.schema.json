@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "APA WS Protocol v1",
+  "type": "object",
+  "oneOf": [
+    {
+      "title": "state_update",
+      "type": "object",
+      "required": ["type", "protocol_version", "game_id", "hand_id", "community_cards", "pot", "min_raise", "my_balance", "opponents", "action_timeout_ms", "street", "current_actor_seat"],
+      "properties": {
+        "type": {"const": "state_update"},
+        "protocol_version": {"const": "1.0"},
+        "game_id": {"type": "string"},
+        "hand_id": {"type": "string"},
+        "hole_cards": {"type": "array", "items": {"type": "string"}},
+        "community_cards": {"type": "array", "items": {"type": "string"}},
+        "pot": {"type": "integer"},
+        "min_raise": {"type": "integer"},
+        "current_bet": {"type": "integer"},
+        "call_amount": {"type": "integer"},
+        "my_balance": {"type": "integer"},
+        "opponents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["seat", "name", "stack", "action"],
+            "properties": {
+              "seat": {"type": "integer"},
+              "name": {"type": "string"},
+              "stack": {"type": "integer"},
+              "action": {"type": "string"}
+            }
+          }
+        },
+        "action_timeout_ms": {"type": "integer"},
+        "street": {"type": "string"},
+        "current_actor_seat": {"type": "integer"}
+      }
+    },
+    {
+      "title": "action_result",
+      "type": "object",
+      "required": ["type", "protocol_version", "ok"],
+      "properties": {
+        "type": {"const": "action_result"},
+        "protocol_version": {"const": "1.0"},
+        "ok": {"type": "boolean"},
+        "error": {"type": "string"}
+      }
+    },
+    {
+      "title": "join_result",
+      "type": "object",
+      "required": ["type", "protocol_version", "ok"],
+      "properties": {
+        "type": {"const": "join_result"},
+        "protocol_version": {"const": "1.0"},
+        "ok": {"type": "boolean"},
+        "error": {"type": "string"},
+        "room_id": {"type": "string"}
+      }
+    },
+    {
+      "title": "event_log",
+      "type": "object",
+      "required": ["type", "protocol_version", "timestamp_ms", "player_seat", "action", "event"],
+      "properties": {
+        "type": {"const": "event_log"},
+        "protocol_version": {"const": "1.0"},
+        "timestamp_ms": {"type": "integer"},
+        "player_seat": {"type": "integer"},
+        "action": {"type": "string"},
+        "amount": {"type": "integer"},
+        "thought_log": {"type": "string"},
+        "event": {"type": "string"}
+      }
+    },
+    {
+      "title": "hand_end",
+      "type": "object",
+      "required": ["type", "protocol_version", "winner", "pot", "balances"],
+      "properties": {
+        "type": {"const": "hand_end"},
+        "protocol_version": {"const": "1.0"},
+        "winner": {"type": "string"},
+        "pot": {"type": "integer"},
+        "balances": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["agent_id", "balance"],
+            "properties": {
+              "agent_id": {"type": "string"},
+              "balance": {"type": "integer"}
+            }
+          }
+        },
+        "showdown": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["agent_id", "hole_cards"],
+            "properties": {
+              "agent_id": {"type": "string"},
+              "hole_cards": {"type": "array", "items": {"type": "string"} }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

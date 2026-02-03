@@ -1,0 +1,12 @@
+# Node
+node_modules
+.vite
+
+# Build output
+internal/ws/static
+
+# OS
+.DS_Store
+
+# Env
+.env

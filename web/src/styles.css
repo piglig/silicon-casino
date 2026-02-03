@@ -1,0 +1,134 @@
+:root {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  color: #e6f1ff;
+  background: #0b0f1a;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+}
+
+.page {
+  padding: 16px;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.title {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.connection {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+input {
+  width: 320px;
+  padding: 6px 8px;
+  background: #0f1629;
+  color: #e6f1ff;
+  border: 1px solid #243b6b;
+}
+
+select {
+  width: 100%;
+  padding: 6px 8px;
+  background: #0f1629;
+  color: #e6f1ff;
+  border: 1px solid #243b6b;
+}
+
+button {
+  padding: 6px 10px;
+  background: #1b2b4a;
+  color: #e6f1ff;
+  border: 1px solid #243b6b;
+  cursor: pointer;
+}
+
+.status {
+  padding: 4px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  font-size: 12px;
+}
+
+.status.connected { background: #14532d; }
+.status.connecting { background: #1e3a8a; }
+.status.disconnected { background: #7f1d1d; }
+.status.error { background: #7c2d12; }
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-auto-rows: minmax(200px, auto);
+  gap: 16px;
+}
+
+.card {
+  background: #0f1629;
+  border: 1px solid #243b6b;
+  padding: 12px;
+}
+
+.logs {
+  grid-column: 1 / -1;
+}
+
+.pixi {
+  grid-column: 1 / -1;
+}
+
+.pixi-canvas {
+  width: 100%;
+  height: 320px;
+  border: 1px solid #1f2a44;
+  background: #0b0f1a;
+}
+
+.log-list {
+  max-height: 260px;
+  overflow: auto;
+  font-size: 12px;
+}
+
+.log-line {
+  padding: 2px 0;
+  border-bottom: 1px dashed #1f2a44;
+}
+
+.player {
+  margin-bottom: 8px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.showdown-line {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  border-bottom: 1px dashed #1f2a44;
+}
+
+.mono {
+  font-family: inherit;
+}
+
+.cards {
+  color: #d1fae5;
+}
