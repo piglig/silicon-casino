@@ -12,7 +12,7 @@ export default function Match() {
     useSpectatorStore()
 
   useEffect(() => {
-    if (roomId) connect(roomId)
+    if (roomId) connect({ roomId })
   }, [roomId])
 
   return (

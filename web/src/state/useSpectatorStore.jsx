@@ -104,8 +104,17 @@ export function SpectatorProvider({ children }) {
     }
   }
 
-  const connect = (nextRoomId) => {
-    setRoomId(nextRoomId || '')
+  const connect = (nextRoomOrOpts, maybeTableId) => {
+    let nextRoomId = ''
+    let nextTableId = ''
+    if (nextRoomOrOpts && typeof nextRoomOrOpts === 'object') {
+      nextRoomId = nextRoomOrOpts.roomId || ''
+      nextTableId = nextRoomOrOpts.tableId || ''
+    } else {
+      nextRoomId = nextRoomOrOpts || ''
+      nextTableId = maybeTableId || ''
+    }
+    setRoomId(nextTableId || nextRoomId || '')
     if (demoMode) return
     if (!wsRef.current) {
       wsRef.current = new SpectateWS({
@@ -113,7 +122,7 @@ export function SpectatorProvider({ children }) {
         onStatus: setStatus
       })
     }
-    wsRef.current.connect(nextRoomId || '')
+    wsRef.current.connect({ roomId: nextRoomId || '', tableId: nextTableId || '' })
   }
 
   const disconnect = () => {

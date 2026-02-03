@@ -62,6 +62,44 @@ func (s *Store) CreateTable(ctx context.Context, roomID, status string, sb, bb i
 	return id, err
 }
 
+func (s *Store) ListTables(ctx context.Context, roomID string, limit, offset int) ([]Table, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	query := `SELECT id, room_id, status, small_blind_cc, big_blind_cc, created_at
+		FROM tables
+		WHERE status = 'active'`
+	args := []any{}
+	if roomID != "" {
+		query += " AND room_id = $1"
+		args = append(args, roomID)
+	}
+	query += " ORDER BY created_at DESC LIMIT $2 OFFSET $3"
+	if roomID == "" {
+		query = `SELECT id, room_id, status, small_blind_cc, big_blind_cc, created_at
+			FROM tables
+			WHERE status = 'active'
+			ORDER BY created_at DESC LIMIT $1 OFFSET $2`
+		args = append(args, limit, offset)
+	} else {
+		args = append(args, limit, offset)
+	}
+	rows, err := s.DB.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Table{}
+	for rows.Next() {
+		var t Table
+		if err := rows.Scan(&t.ID, &t.RoomID, &t.Status, &t.SmallBlindCC, &t.BigBlindCC, &t.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, nil
+}
+
 func (s *Store) CreateHand(ctx context.Context, tableID string) (string, error) {
 	id := NewID()
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO hands (id, table_id) VALUES ($1,$2)`, id, tableID)
@@ -326,6 +364,62 @@ func (s *Store) ListProviderRates(ctx context.Context) ([]ProviderRate, error) {
 		out = append(out, r)
 	}
 	return out, nil
+}
+
+func (s *Store) IsAgentBlacklisted(ctx context.Context, agentID string) (bool, string, error) {
+	row := s.DB.QueryRowContext(ctx, `SELECT reason FROM agent_blacklist WHERE agent_id = $1`, agentID)
+	var reason string
+	if err := row.Scan(&reason); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, "", nil
+		}
+		return false, "", err
+	}
+	return true, reason, nil
+}
+
+func (s *Store) BlacklistAgent(ctx context.Context, agentID, reason string) error {
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO agent_blacklist (agent_id, reason) VALUES ($1,$2) ON CONFLICT (agent_id) DO UPDATE SET reason = EXCLUDED.reason, created_at = now()`, agentID, reason)
+	return err
+}
+
+func (s *Store) RecordAgentKeyAttempt(ctx context.Context, agentID, provider, status string) error {
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO agent_key_attempts (id, agent_id, provider, status) VALUES ($1,$2,$3,$4)`, NewID(), agentID, provider, status)
+	return err
+}
+
+func (s *Store) LastSuccessfulKeyBindAt(ctx context.Context, agentID string) (*time.Time, error) {
+	row := s.DB.QueryRowContext(ctx, `SELECT created_at FROM agent_key_attempts WHERE agent_id = $1 AND status = 'success' ORDER BY created_at DESC LIMIT 1`, agentID)
+	var t time.Time
+	if err := row.Scan(&t); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &t, nil
+}
+
+func (s *Store) CountConsecutiveInvalidKeyAttempts(ctx context.Context, agentID string) (int, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT status FROM agent_key_attempts WHERE agent_id = $1 ORDER BY created_at DESC`, agentID)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		var status string
+		if err := rows.Scan(&status); err != nil {
+			return 0, err
+		}
+		if status == "success" {
+			break
+		}
+		if status == "invalid_key" {
+			count++
+		}
+	}
+	return count, nil
 }
 
 func (s *Store) GetProviderRate(ctx context.Context, provider string) (*ProviderRate, error) {

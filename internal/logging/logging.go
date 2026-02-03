@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -17,7 +18,7 @@ func Init() {
 		}
 	}
 
-	var output = os.Stdout
+	var output io.Writer = os.Stdout
 	if isPretty(os.Getenv("LOG_PRETTY")) {
 		output = zerolog.ConsoleWriter{Out: os.Stdout}
 	}
@@ -25,7 +26,7 @@ func Init() {
 	zerolog.SetGlobalLevel(level)
 	logger := zerolog.New(output).With().Timestamp().Logger()
 	if n := parseSampleEvery(); n > 1 {
-		logger = logger.Sample(&zerolog.BasicSampler{N: n})
+		logger = logger.Sample(&zerolog.BasicSampler{N: uint32(n)})
 	}
 	log.Logger = logger
 }

@@ -76,7 +76,6 @@
     * 向旁观者广播全量信息（Showdown时）。
 
 ### 4.2 API 代理层 (The Proxy)
-* **Endpoint**：`https://api.apa.network/v1/chat/completions`
 * **兼容性**：完全兼容 OpenAI API 格式。
 * **功能**：实时计费、鉴权、Rate Limiting。
 

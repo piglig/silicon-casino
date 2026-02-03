@@ -25,6 +25,7 @@ type Client struct {
 	agent        *store.Agent
 	session      *TableSession
 	spectateRoom string
+	spectateTable string
 }
 
 type TableSession struct {
@@ -61,6 +62,19 @@ func NewServer(store *store.Store, ledger *ledger.Ledger) *Server {
 		sessions:   map[string]*TableSession{},
 		byAgentID:  map[string]*Client{},
 	}
+}
+
+func (s *Server) FindTableByAgent(agentID string) (string, string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if agentID == "" {
+		return "", "", false
+	}
+	c := s.byAgentID[agentID]
+	if c == nil || c.session == nil || c.session.room == nil {
+		return "", "", false
+	}
+	return c.session.id, c.session.room.ID, true
 }
 
 func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
@@ -105,10 +119,17 @@ func (s *Server) readLoop(c *Client) {
 			if c.role != "" {
 				continue
 			}
+			var raw map[string]any
+			_ = json.Unmarshal(msg, &raw)
+			if raw["api_key"] != nil || raw["agent_id"] != nil {
+				_ = c.conn.Close()
+				return
+			}
 			var spec SpectateMessage
 			_ = json.Unmarshal(msg, &spec)
 			c.role = "spectator"
 			c.spectateRoom = spec.RoomID
+			c.spectateTable = spec.TableID
 			s.mu.Lock()
 			s.spectators[c] = true
 			s.mu.Unlock()
@@ -379,7 +400,7 @@ func (ts *TableSession) broadcastState(s *Server) {
 	s.mu.Lock()
 	for c := range s.spectators {
 		if c != nil {
-			if c.spectateRoom == "" || c.spectateRoom == ts.room.ID {
+			if s.spectatorMatches(c, ts) {
 				safeSend(c.send, msg0Public)
 			}
 		}
@@ -412,7 +433,7 @@ func (ts *TableSession) broadcastHandEnd(winner string, s *Server) {
 	msgSpectators, _ := json.Marshal(HandEnd{Type: "hand_end", ProtocolVersion: game.ProtocolVersion, Winner: winner, Pot: ts.engine.State.Pot, Balances: balances, Showdown: showdown})
 	s.mu.Lock()
 	for c := range s.spectators {
-		if c.spectateRoom == "" || c.spectateRoom == ts.room.ID {
+		if s.spectatorMatches(c, ts) {
 			safeSend(c.send, msgSpectators)
 		}
 	}
@@ -472,11 +493,24 @@ func (ts *TableSession) broadcastEventLog(playerIdx int, action game.ActionType,
 	}
 	s.mu.Lock()
 	for c := range s.spectators {
-		if c.spectateRoom == "" || c.spectateRoom == ts.room.ID {
+		if s.spectatorMatches(c, ts) {
 			safeSend(c.send, msg)
 		}
 	}
 	s.mu.Unlock()
+}
+
+func (s *Server) spectatorMatches(c *Client, ts *TableSession) bool {
+	if c == nil || ts == nil {
+		return false
+	}
+	if c.spectateTable != "" {
+		return c.spectateTable == ts.id
+	}
+	if c.spectateRoom != "" {
+		return c.spectateRoom == ts.room.ID
+	}
+	return true
 }
 
 func (ts *TableSession) metricsIncTimeouts(s *Server) {

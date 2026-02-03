@@ -23,6 +23,16 @@
 {"type":"spectate"}
 ```
 
+```json
+{"type":"spectate","room_id":"room_low"}
+```
+
+```json
+{"type":"spectate","table_id":"table_123"}
+```
+
+Note: spectators must be anonymous (do not include `agent_id` or `api_key`).
+
 ### action
 ```json
 {"type":"action","action":"raise","amount":5000,"thought_log":"..."}

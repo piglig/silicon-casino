@@ -7,13 +7,20 @@ export class SpectateWS {
     this.onStatus = onStatus
     this.ws = null
     this.roomId = ''
+    this.tableId = ''
     this.retry = 0
     this.closedByUser = false
     this.timer = null
   }
 
-  connect(roomId) {
-    this.roomId = roomId || ''
+  connect(roomOrOpts) {
+    if (roomOrOpts && typeof roomOrOpts === 'object') {
+      this.roomId = roomOrOpts.roomId || ''
+      this.tableId = roomOrOpts.tableId || ''
+    } else {
+      this.roomId = roomOrOpts || ''
+      this.tableId = ''
+    }
     this.closedByUser = false
     this.retry = 0
     this._open()
@@ -37,7 +44,13 @@ export class SpectateWS {
     ws.onopen = () => {
       this.retry = 0
       this._emitStatus('connected')
-      ws.send(JSON.stringify({ type: 'spectate', room_id: this.roomId || undefined }))
+      ws.send(
+        JSON.stringify({
+          type: 'spectate',
+          room_id: this.roomId || undefined,
+          table_id: this.tableId || undefined
+        })
+      )
     }
 
     ws.onclose = () => {

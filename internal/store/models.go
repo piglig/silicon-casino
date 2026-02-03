@@ -103,3 +103,17 @@ type ProviderRate struct {
 	Weight              float64
 	UpdatedAt           time.Time
 }
+
+type AgentBlacklist struct {
+	AgentID   string
+	Reason    string
+	CreatedAt time.Time
+}
+
+type AgentKeyAttempt struct {
+	ID        string
+	AgentID   string
+	Provider  string
+	Status    string
+	CreatedAt time.Time
+}

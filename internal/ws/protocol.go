@@ -11,8 +11,9 @@ type JoinMessage struct {
 }
 
 type SpectateMessage struct {
-	Type   string `json:"type"`
-	RoomID string `json:"room_id,omitempty"`
+	Type    string `json:"type"`
+	RoomID  string `json:"room_id,omitempty"`
+	TableID string `json:"table_id,omitempty"`
 }
 
 type ActionMessage struct {
