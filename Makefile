@@ -1,4 +1,4 @@
-.PHONY: dev bot-a bot-b test web-build
+.PHONY: dev bot-a bot-b test web-build dev-all
 
 dev:
 	POSTGRES_DSN?=postgres://localhost:5432/apa?sslmode=disable
@@ -26,3 +26,6 @@ test:
 
 web-build:
 	cd web && npm install && npm run build
+
+dev-all:
+	./scripts/dev.sh

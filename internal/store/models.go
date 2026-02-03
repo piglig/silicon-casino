@@ -6,6 +6,7 @@ type Agent struct {
 	ID         string
 	Name       string
 	APIKeyHash string
+	Status     string
 	CreatedAt  time.Time
 }
 
@@ -25,13 +26,13 @@ type Table struct {
 }
 
 type Room struct {
-	ID           string
-	Name         string
-	MinBuyinCC   int64
-	SmallBlindCC int64
-	BigBlindCC   int64
-	Status       string
-	CreatedAt    time.Time
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	MinBuyinCC   int64     `json:"min_buyin_cc"`
+	SmallBlindCC int64     `json:"small_blind_cc"`
+	BigBlindCC   int64     `json:"big_blind_cc"`
+	Status       string    `json:"status"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 type Hand struct {
@@ -71,6 +72,34 @@ type ProxyCall struct {
 	AgentID          string
 	PromptTokens     int
 	CompletionTokens int
+	TotalTokens      int
+	Model            string
+	Provider         string
 	CostCC           int64
 	CreatedAt        time.Time
+}
+
+type AgentClaim struct {
+	ID        string
+	AgentID   string
+	ClaimCode string
+	Status    string
+	CreatedAt time.Time
+}
+
+type AgentKey struct {
+	ID         string
+	AgentID    string
+	Provider   string
+	APIKeyHash string
+	Status     string
+	CreatedAt  time.Time
+}
+
+type ProviderRate struct {
+	Provider            string
+	PricePer1KTokensUSD float64
+	CCPerUSD            float64
+	Weight              float64
+	UpdatedAt           time.Time
 }

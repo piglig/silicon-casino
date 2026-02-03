@@ -8,8 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"time"
-
-	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -35,9 +33,9 @@ func HashAPIKey(key string) string {
 
 func (s *Store) GetAgentByAPIKey(ctx context.Context, apiKey string) (*Agent, error) {
 	hash := HashAPIKey(apiKey)
-	row := s.DB.QueryRowContext(ctx, `SELECT id, name, api_key_hash, created_at FROM agents WHERE api_key_hash = $1`, hash)
+	row := s.DB.QueryRowContext(ctx, `SELECT id, name, api_key_hash, status, created_at FROM agents WHERE api_key_hash = $1`, hash)
 	var a Agent
-	if err := row.Scan(&a.ID, &a.Name, &a.APIKeyHash, &a.CreatedAt); err != nil {
+	if err := row.Scan(&a.ID, &a.Name, &a.APIKeyHash, &a.Status, &a.CreatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -59,13 +57,13 @@ func (s *Store) GetAccountBalance(ctx context.Context, agentID string) (int64, e
 }
 
 func (s *Store) CreateTable(ctx context.Context, roomID, status string, sb, bb int64) (string, error) {
-	id := uuid.New().String()
+	id := NewID()
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO tables (id, room_id, status, small_blind_cc, big_blind_cc) VALUES ($1,$2,$3,$4,$5)`, id, roomID, status, sb, bb)
 	return id, err
 }
 
 func (s *Store) CreateHand(ctx context.Context, tableID string) (string, error) {
-	id := uuid.New().String()
+	id := NewID()
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO hands (id, table_id) VALUES ($1,$2)`, id, tableID)
 	return id, err
 }
@@ -81,8 +79,15 @@ func (s *Store) RecordAction(ctx context.Context, handID, agentID, actionType st
 }
 
 func (s *Store) RecordLedgerEntry(ctx context.Context, tx *sql.Tx, agentID, entryType string, amount int64, refType, refID string) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO ledger_entries (id, agent_id, type, amount_cc, ref_type, ref_id) VALUES ($1,$2,$3,$4,$5,$6)`, uuid.New().String(), agentID, entryType, amount, refType, refID)
+	_, err := tx.ExecContext(ctx, `INSERT INTO ledger_entries (id, agent_id, type, amount_cc, ref_type, ref_id) VALUES ($1,$2,$3,$4,$5,$6)`, NewID(), agentID, entryType, amount, refType, refID)
 	return err
+}
+
+func (s *Store) RecordProxyCall(ctx context.Context, agentID, model, provider string, prompt, completion, total int, cost int64) (string, error) {
+	id := NewID()
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO proxy_calls (id, agent_id, prompt_tokens, completion_tokens, total_tokens, model, provider, cost_cc) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		id, agentID, prompt, completion, total, model, provider, cost)
+	return id, err
 }
 
 func (s *Store) Debit(ctx context.Context, agentID string, amount int64, entryType, refType, refID string) (int64, error) {
@@ -152,9 +157,9 @@ func (s *Store) EnsureAccount(ctx context.Context, agentID string, initial int64
 }
 
 func (s *Store) CreateAgent(ctx context.Context, name, apiKey string) (string, error) {
-	id := uuid.New().String()
+	id := NewID()
 	hash := HashAPIKey(apiKey)
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO agents (id, name, api_key_hash) VALUES ($1,$2,$3)`, id, name, hash)
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO agents (id, name, api_key_hash, status) VALUES ($1,$2,$3,'pending')`, id, name, hash)
 	return id, err
 }
 
@@ -194,7 +199,7 @@ func (s *Store) GetRoom(ctx context.Context, id string) (*Room, error) {
 }
 
 func (s *Store) CreateRoom(ctx context.Context, name string, minBuyin, sb, bb int64) (string, error) {
-	id := uuid.New().String()
+	id := NewID()
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO rooms (id, name, min_buyin_cc, small_blind_cc, big_blind_cc, status) VALUES ($1,$2,$3,$4,$5,'active')`, id, name, minBuyin, sb, bb)
 	return id, err
 }
@@ -239,7 +244,7 @@ func (s *Store) ListAgents(ctx context.Context, limit, offset int) ([]Agent, err
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT id, name, api_key_hash, created_at FROM agents ORDER BY created_at DESC LIMIT $1 OFFSET $2`, limit, offset)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, name, api_key_hash, status, created_at FROM agents ORDER BY created_at DESC LIMIT $1 OFFSET $2`, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -247,12 +252,119 @@ func (s *Store) ListAgents(ctx context.Context, limit, offset int) ([]Agent, err
 	out := []Agent{}
 	for rows.Next() {
 		var a Agent
-		if err := rows.Scan(&a.ID, &a.Name, &a.APIKeyHash, &a.CreatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.Name, &a.APIKeyHash, &a.Status, &a.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, a)
 	}
 	return out, nil
+}
+
+func (s *Store) CreateAgentClaim(ctx context.Context, agentID, claimCode string) (string, error) {
+	id := NewID()
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO agent_claims (id, agent_id, claim_code, status) VALUES ($1,$2,$3,'pending')`, id, agentID, claimCode)
+	return id, err
+}
+
+func (s *Store) GetAgentClaimByAgent(ctx context.Context, agentID string) (*AgentClaim, error) {
+	row := s.DB.QueryRowContext(ctx, `SELECT id, agent_id, claim_code, status, created_at FROM agent_claims WHERE agent_id = $1`, agentID)
+	var c AgentClaim
+	if err := row.Scan(&c.ID, &c.AgentID, &c.ClaimCode, &c.Status, &c.CreatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &c, nil
+}
+
+func (s *Store) MarkAgentClaimed(ctx context.Context, agentID string) error {
+	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `UPDATE agents SET status = 'claimed' WHERE id = $1`, agentID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE agent_claims SET status = 'claimed' WHERE agent_id = $1`, agentID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) CreateAgentKey(ctx context.Context, agentID, provider, apiKeyHash string) (string, error) {
+	id := NewID()
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO agent_keys (id, agent_id, provider, api_key_hash, status) VALUES ($1,$2,$3,$4,'active')`, id, agentID, provider, apiKeyHash)
+	return id, err
+}
+
+func (s *Store) GetAgentKeyByHash(ctx context.Context, apiKeyHash string) (*AgentKey, error) {
+	row := s.DB.QueryRowContext(ctx, `SELECT id, agent_id, provider, api_key_hash, status, created_at FROM agent_keys WHERE api_key_hash = $1`, apiKeyHash)
+	var k AgentKey
+	if err := row.Scan(&k.ID, &k.AgentID, &k.Provider, &k.APIKeyHash, &k.Status, &k.CreatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &k, nil
+}
+
+func (s *Store) ListProviderRates(ctx context.Context) ([]ProviderRate, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT provider, price_per_1k_tokens_usd, cc_per_usd, weight, updated_at FROM provider_rates ORDER BY provider ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ProviderRate{}
+	for rows.Next() {
+		var r ProviderRate
+		if err := rows.Scan(&r.Provider, &r.PricePer1KTokensUSD, &r.CCPerUSD, &r.Weight, &r.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+func (s *Store) GetProviderRate(ctx context.Context, provider string) (*ProviderRate, error) {
+	row := s.DB.QueryRowContext(ctx, `SELECT provider, price_per_1k_tokens_usd, cc_per_usd, weight, updated_at FROM provider_rates WHERE provider = $1`, provider)
+	var r ProviderRate
+	if err := row.Scan(&r.Provider, &r.PricePer1KTokensUSD, &r.CCPerUSD, &r.Weight, &r.UpdatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &r, nil
+}
+
+func (s *Store) UpsertProviderRate(ctx context.Context, provider string, pricePer1KTokensUSD, ccPerUSD, weight float64) error {
+	_, err := s.DB.ExecContext(ctx, `
+		INSERT INTO provider_rates (provider, price_per_1k_tokens_usd, cc_per_usd, weight)
+		VALUES ($1,$2,$3,$4)
+		ON CONFLICT (provider) DO UPDATE
+		SET price_per_1k_tokens_usd = EXCLUDED.price_per_1k_tokens_usd,
+		    cc_per_usd = EXCLUDED.cc_per_usd,
+		    weight = EXCLUDED.weight,
+		    updated_at = now()
+	`, provider, pricePer1KTokensUSD, ccPerUSD, weight)
+	return err
+}
+
+func (s *Store) EnsureDefaultProviderRates(ctx context.Context, defaults []ProviderRate) error {
+	for _, r := range defaults {
+		_, err := s.DB.ExecContext(ctx, `
+			INSERT INTO provider_rates (provider, price_per_1k_tokens_usd, cc_per_usd, weight)
+			VALUES ($1,$2,$3,$4)
+			ON CONFLICT (provider) DO NOTHING
+		`, r.Provider, r.PricePer1KTokensUSD, r.CCPerUSD, r.Weight)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Store) ListAccounts(ctx context.Context, agentID string, limit, offset int) ([]Account, error) {

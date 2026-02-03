@@ -10,3 +10,7 @@ internal/ws/static
 
 # Env
 .env
+
+.vscode/
+
+__debug_*

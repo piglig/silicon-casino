@@ -118,6 +118,18 @@ button {
   margin-bottom: 8px;
 }
 
+.error {
+  color: #fecaca;
+  margin-bottom: 8px;
+}
+
+.result {
+  margin: 8px 0;
+  padding: 8px;
+  background: #0b1220;
+  border: 1px solid #1f2a44;
+}
+
 .showdown-line {
   display: flex;
   justify-content: space-between;

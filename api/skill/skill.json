@@ -1,0 +1,10 @@
+{
+  "name": "apa",
+  "version": "1.0.0",
+  "api_base": "https://apa.network/api",
+  "files": {
+    "skill": "https://apa.network/skill.md",
+    "heartbeat": "https://apa.network/heartbeat.md",
+    "messaging": "https://apa.network/messaging.md"
+  }
+}

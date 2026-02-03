@@ -3,30 +3,36 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"silicon-casino/internal/ledger"
+	"silicon-casino/internal/logging"
+	"silicon-casino/internal/proxy"
 	"silicon-casino/internal/store"
 	"silicon-casino/internal/ws"
+
+	"github.com/rs/zerolog/log"
 )
 
 func main() {
+	logging.Init()
 	dsn := getenv("POSTGRES_DSN", "postgres://localhost:5432/apa?sslmode=disable")
 	addr := getenv("WS_ADDR", ":8080")
 	initial := int64(100000)
 
 	st, err := store.New(dsn)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal().Err(err).Msg("store init failed")
 	}
 	if err := st.Ping(context.Background()); err != nil {
-		log.Fatal(err)
+		log.Fatal().Err(err).Msg("db ping failed")
 	}
 
 	// Optional seed from env
@@ -35,7 +41,10 @@ func main() {
 
 	led := ledger.New(st)
 	if err := st.EnsureDefaultRooms(context.Background()); err != nil {
-		log.Fatal(err)
+		log.Fatal().Err(err).Msg("ensure default rooms failed")
+	}
+	if err := st.EnsureDefaultProviderRates(context.Background(), defaultProviderRates()); err != nil {
+		log.Fatal().Err(err).Msg("ensure provider rates failed")
 	}
 	srv := ws.NewServer(st, led)
 
@@ -48,13 +57,27 @@ func main() {
 	h.HandleFunc("/api/topup", withAdminAuth(topupHandler(st)))
 	h.HandleFunc("/api/leaderboard", withAdminAuth(leaderboardHandler(st)))
 	h.HandleFunc("/api/rooms", withAdminAuth(roomsHandler(st)))
+	h.HandleFunc("/api/providers/rates", withAdminAuth(providerRatesHandler(st)))
+	h.HandleFunc("/api/public/rooms", publicRoomsHandler(st))
+	h.HandleFunc("/api/agents/register", registerAgentHandler(st))
+	h.HandleFunc("/api/agents/status", withAgentAuth(st, agentStatusHandler(st)))
+	h.HandleFunc("/api/agents/claim", claimAgentHandler(st))
+	h.HandleFunc("/api/agents/bind_key", withAgentAuth(st, bindKeyHandler(st)))
+	h.Handle("/v1/chat/completions", proxy.NewHandler(st))
 
 	staticDir := filepath.Join("internal", "ws", "static")
 	h.Handle("/", http.FileServer(http.Dir(staticDir)))
+	viewerDir := filepath.Join("internal", "ws", "static-viewer")
+	h.Handle("/viewer/", http.StripPrefix("/viewer/", http.FileServer(http.Dir(viewerDir))))
+	skillServer := http.FileServer(http.Dir(filepath.Join("api", "skill")))
+	h.Handle("/skill.md", skillServer)
+	h.Handle("/heartbeat.md", skillServer)
+	h.Handle("/messaging.md", skillServer)
+	h.Handle("/skill.json", skillServer)
 
 	server := &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 5 * time.Second}
-	log.Println("ws listening", addr)
-	log.Fatal(server.ListenAndServe())
+	log.Info().Str("addr", addr).Msg("ws listening")
+	log.Fatal().Err(server.ListenAndServe()).Msg("server stopped")
 }
 
 func seedAgent(st *store.Store, nameEnv, keyEnv string, initial int64) {
@@ -71,7 +94,7 @@ func seedAgent(st *store.Store, nameEnv, keyEnv string, initial int64) {
 	}
 	id, err := st.CreateAgent(ctx, name, key)
 	if err != nil {
-		log.Println("seed agent error", err)
+		log.Error().Err(err).Msg("seed agent error")
 		return
 	}
 	_ = st.EnsureAccount(ctx, id, initial)
@@ -82,6 +105,33 @@ func getenv(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func getenvFloat(key string, def float64) float64 {
+	if v := os.Getenv(key); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
+		}
+	}
+	return def
+}
+
+func defaultProviderRates() []store.ProviderRate {
+	ccPerUSD := getenvFloat("CC_PER_USD", 1000)
+	return []store.ProviderRate{
+		{
+			Provider:            "openai",
+			PricePer1KTokensUSD: getenvFloat("OPENAI_PRICE_PER_1K_USD", 0.0001),
+			CCPerUSD:            ccPerUSD,
+			Weight:              getenvFloat("OPENAI_WEIGHT", 1.0),
+		},
+		{
+			Provider:            "kimi",
+			PricePer1KTokensUSD: getenvFloat("KIMI_PRICE_PER_1K_USD", 0.0001),
+			CCPerUSD:            ccPerUSD,
+			Weight:              getenvFloat("KIMI_WEIGHT", 1.0),
+		},
+	}
 }
 
 func healthHandler(st *store.Store) http.HandlerFunc {
@@ -221,6 +271,268 @@ func roomsHandler(st *store.Store) http.HandlerFunc {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
 	}
+}
+
+func providerRatesHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			items, err := st.ListProviderRates(r.Context())
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
+		case http.MethodPost:
+			var body struct {
+				Provider            string  `json:"provider"`
+				PricePer1KTokensUSD float64 `json:"price_per_1k_tokens_usd"`
+				CCPerUSD            float64 `json:"cc_per_usd"`
+				Weight              float64 `json:"weight"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			body.Provider = strings.ToLower(strings.TrimSpace(body.Provider))
+			if body.Provider == "" || body.PricePer1KTokensUSD <= 0 || body.CCPerUSD <= 0 || body.Weight <= 0 {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if err := st.UpsertProviderRate(r.Context(), body.Provider, body.PricePer1KTokensUSD, body.CCPerUSD, body.Weight); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}
+}
+
+func publicRoomsHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		items, err := st.ListRooms(r.Context())
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		// public subset
+		out := []map[string]any{}
+		for _, it := range items {
+			out = append(out, map[string]any{
+				"id":             it.ID,
+				"name":           it.Name,
+				"min_buyin_cc":   it.MinBuyinCC,
+				"small_blind_cc": it.SmallBlindCC,
+				"big_blind_cc":   it.BigBlindCC,
+			})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": out})
+	}
+}
+
+func registerAgentHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		var body struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if body.Name == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		apiKey := "apa_" + strconv.FormatInt(time.Now().UnixNano(), 10)
+		id, err := st.CreateAgent(r.Context(), body.Name, apiKey)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		claimCode := "apa_claim_" + strconv.FormatInt(time.Now().UnixNano(), 10)
+		if _, err := st.CreateAgentClaim(r.Context(), id, claimCode); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_ = st.EnsureAccount(r.Context(), id, 10000)
+		claimURL := "https://apa.network/claim/" + claimCode
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"agent": map[string]any{
+				"agent_id":          id,
+				"api_key":           apiKey,
+				"claim_url":         claimURL,
+				"verification_code": claimCode,
+			},
+		})
+	}
+}
+
+func agentStatusHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		agent := r.Context().Value(agentContextKey{}).(*store.Agent)
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": agent.Status})
+	}
+}
+
+func claimAgentHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		var body struct {
+			AgentID   string `json:"agent_id"`
+			ClaimCode string `json:"claim_code"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		claim, err := st.GetAgentClaimByAgent(r.Context(), body.AgentID)
+		if err != nil || claim.ClaimCode != body.ClaimCode {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if err := st.MarkAgentClaimed(r.Context(), body.AgentID); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}
+}
+
+func bindKeyHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		var body struct {
+			Provider  string  `json:"provider"`
+			APIKey    string  `json:"api_key"`
+			BudgetUSD float64 `json:"budget_usd"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		agent := r.Context().Value(agentContextKey{}).(*store.Agent)
+		body.Provider = strings.ToLower(strings.TrimSpace(body.Provider))
+		if body.Provider == "" || body.APIKey == "" || body.BudgetUSD <= 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": "invalid_request"})
+			return
+		}
+		if body.Provider != "openai" && body.Provider != "kimi" {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": "invalid_provider"})
+			return
+		}
+
+		keyHash := store.HashAPIKey(body.APIKey)
+		if existing, err := st.GetAgentKeyByHash(r.Context(), keyHash); err == nil && existing != nil {
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": "api_key_already_bound"})
+			return
+		} else if err != nil && err != store.ErrNotFound {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		if shouldVerifyVendorKey() {
+			if err := verifyVendorKey(r.Context(), body.Provider, body.APIKey); err != nil {
+				w.WriteHeader(http.StatusUnauthorized)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": "invalid_vendor_key"})
+				return
+			}
+		}
+
+		rate, err := st.GetProviderRate(r.Context(), body.Provider)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": "invalid_provider"})
+			return
+		}
+		credit := store.ComputeCCFromBudgetUSD(body.BudgetUSD, rate.CCPerUSD, rate.Weight)
+		if credit <= 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": "invalid_request"})
+			return
+		}
+
+		keyID, err := st.CreateAgentKey(r.Context(), agent.ID, body.Provider, keyHash)
+		if err != nil {
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": "api_key_already_bound"})
+			return
+		}
+		_ = st.EnsureAccount(r.Context(), agent.ID, 0)
+		newBal, err := st.Credit(r.Context(), agent.ID, credit, "key_credit", "agent_key", keyID)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":         true,
+			"added_cc":   credit,
+			"balance_cc": newBal,
+		})
+	}
+}
+
+type agentContextKey struct{}
+
+func withAgentAuth(st *store.Store, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		prefix := "Bearer "
+		if len(auth) <= len(prefix) || auth[:len(prefix)] != prefix {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		apiKey := auth[len(prefix):]
+		agent, err := st.GetAgentByAPIKey(r.Context(), apiKey)
+		if err != nil {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		ctx := context.WithValue(r.Context(), agentContextKey{}, agent)
+		next(w, r.WithContext(ctx))
+	}
+}
+
+func shouldVerifyVendorKey() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("VERIFY_VENDOR_KEY")))
+	return v == "1" || v == "true" || v == "yes"
+}
+
+func verifyVendorKey(ctx context.Context, provider, apiKey string) error {
+	base := getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+	if provider == "kimi" {
+		base = getenv("KIMI_BASE_URL", "https://api.moonshot.ai/v1")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+"/models", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("invalid_vendor_key")
+	}
+	return nil
 }
 
 type leaderboardCache struct {

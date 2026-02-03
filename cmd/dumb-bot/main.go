@@ -2,19 +2,23 @@ package main
 
 import (
 	"encoding/json"
-	"log"
 	"math/rand"
 	"os"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/rs/zerolog/log"
+
+	"silicon-casino/internal/logging"
 )
 
 type Snapshot struct {
-	Type       string `json:"type"`
-	MinRaise   int64  `json:"min_raise"`
-	CurrentBet int64  `json:"current_bet"`
-	CallAmount int64  `json:"call_amount"`
+	Type             string `json:"type"`
+	MinRaise         int64  `json:"min_raise"`
+	CurrentBet       int64  `json:"current_bet"`
+	CallAmount       int64  `json:"call_amount"`
+	CurrentActorSeat int    `json:"current_actor_seat"`
+	MySeat           int    `json:"my_seat"`
 }
 
 type Join struct {
@@ -34,11 +38,13 @@ func main() {
 	agentID := getenv("AGENT_ID", "bot")
 	apiKey := getenv("API_KEY", "")
 
+	logging.Init()
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal().Err(err).Msg("dial ws failed")
 	}
 	defer conn.Close()
+	log.Info().Str("agent_id", agentID).Str("ws_url", wsURL).Msg("bot connected")
 
 	join := Join{Type: "join", AgentID: agentID, APIKey: apiKey}
 	msg, _ := json.Marshal(join)
@@ -61,6 +67,9 @@ func main() {
 		}
 		var snap Snapshot
 		if err := json.Unmarshal(data, &snap); err != nil {
+			continue
+		}
+		if snap.CurrentActorSeat != snap.MySeat {
 			continue
 		}
 		action := decide(rnd, snap)

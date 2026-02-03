@@ -73,6 +73,7 @@
 - `insufficient_buyin`
 - `room_not_found`
 - `no_available_room`
+- `invalid_api_key`
 
 ### event_log
 用于实时展示动作与 thought_log。

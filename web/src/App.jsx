@@ -14,6 +14,16 @@ export default function App() {
   const [agentId, setAgentId] = useState('bot')
   const [apiKey, setApiKey] = useState('')
   const [roomId, setRoomId] = useState('')
+  const [regName, setRegName] = useState('')
+  const [regDesc, setRegDesc] = useState('')
+  const [regResult, setRegResult] = useState(null)
+  const [claimAgentId, setClaimAgentId] = useState('')
+  const [claimCode, setClaimCode] = useState('')
+  const [claimResult, setClaimResult] = useState(null)
+  const [statusKey, setStatusKey] = useState('')
+  const [statusResult, setStatusResult] = useState(null)
+  const [adminKey, setAdminKey] = useState(localStorage.getItem('apa_admin_key') || '')
+  const [errorMsg, setErrorMsg] = useState('')
   const wsRef = useRef(null)
 
   const appendLog = (line) => {
@@ -22,6 +32,14 @@ export default function App() {
       return next.slice(-200)
     })
   }
+
+  useEffect(() => {
+    if (adminKey) {
+      localStorage.setItem('apa_admin_key', adminKey)
+    } else {
+      localStorage.removeItem('apa_admin_key')
+    }
+  }, [adminKey])
 
   const connect = (mode) => {
     if (wsRef.current) wsRef.current.close()
@@ -65,7 +83,12 @@ export default function App() {
 
   const loadRooms = async () => {
     try {
-      const res = await fetch('/api/rooms')
+      const headers = adminKey ? { 'X-Admin-Key': adminKey } : undefined
+      const res = await fetch('/api/rooms', { headers })
+      if (!res.ok) {
+        appendLog(`rooms_fetch_failed status=${res.status}`)
+        return
+      }
       const data = await res.json()
       setRooms(data.items || [])
       if (!roomId && data.items?.length) setRoomId(data.items[0].id)
@@ -74,11 +97,69 @@ export default function App() {
     }
   }
 
+  const registerAgent = async () => {
+    setErrorMsg('')
+    setRegResult(null)
+    try {
+      const res = await fetch('/api/agents/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: regName, description: regDesc })
+      })
+      if (!res.ok) {
+        setErrorMsg('register_failed')
+        return
+      }
+      const data = await res.json()
+      setRegResult(data.agent || null)
+    } catch (e) {
+      setErrorMsg('register_failed')
+    }
+  }
+
+  const claimAgent = async () => {
+    setErrorMsg('')
+    setClaimResult(null)
+    try {
+      const res = await fetch('/api/agents/claim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent_id: claimAgentId, claim_code: claimCode })
+      })
+      if (!res.ok) {
+        setErrorMsg('invalid_claim')
+        return
+      }
+      const data = await res.json()
+      setClaimResult(data)
+    } catch (e) {
+      setErrorMsg('invalid_claim')
+    }
+  }
+
+  const checkStatus = async () => {
+    setErrorMsg('')
+    setStatusResult(null)
+    try {
+      const res = await fetch('/api/agents/status', {
+        headers: { Authorization: `Bearer ${statusKey}` }
+      })
+      if (!res.ok) {
+        setErrorMsg('invalid_api_key')
+        return
+      }
+      const data = await res.json()
+      setStatusResult(data)
+    } catch (e) {
+      setErrorMsg('invalid_api_key')
+    }
+  }
+
   useEffect(() => {
     loadRooms()
-    const id = setInterval(loadRooms, 5000)
+    const id = setInterval(() => loadRooms(), 5000)
     return () => clearInterval(id)
-  }, [])
+  }, [adminKey])
 
   const community = useMemo(() => (snapshot?.community_cards || []).join(' '), [snapshot])
   const opp = snapshot?.opponents?.[0]
@@ -89,6 +170,11 @@ export default function App() {
         <div className="title">APA Debug UI</div>
         <div className="connection">
           <input value={url} onChange={(e) => setUrl(e.target.value)} />
+          <input
+            placeholder="Admin Key"
+            value={adminKey}
+            onChange={(e) => setAdminKey(e.target.value)}
+          />
           <button onClick={() => connect('spectate')}>Spectate</button>
           <button onClick={() => connect('random')}>Join Random</button>
           <button onClick={() => connect('select')}>Join Room</button>
@@ -146,6 +232,46 @@ export default function App() {
             <div>Stack: {opp?.stack ?? '-'}</div>
             <div>Last Action: {opp?.action ?? '-'}</div>
           </div>
+        </div>
+
+        <div className="card">
+          <h3>Agent Claim</h3>
+          {errorMsg && <div className="error">{errorMsg}</div>}
+          <div className="field">
+            <label>Register Name</label>
+            <input value={regName} onChange={(e) => setRegName(e.target.value)} />
+          </div>
+          <div className="field">
+            <label>Register Description</label>
+            <input value={regDesc} onChange={(e) => setRegDesc(e.target.value)} />
+          </div>
+          <button onClick={registerAgent}>Register</button>
+          {regResult && (
+            <div className="result">
+              <div>agent_id: <span className="mono">{regResult.agent_id}</span></div>
+              <div>api_key: <span className="mono">{regResult.api_key}</span> (show once)</div>
+              <div>claim_code: <span className="mono">{regResult.verification_code}</span></div>
+              <div>claim_url: <span className="mono">{regResult.claim_url}</span></div>
+            </div>
+          )}
+
+          <div className="field">
+            <label>Claim Agent ID</label>
+            <input value={claimAgentId} onChange={(e) => setClaimAgentId(e.target.value)} />
+          </div>
+          <div className="field">
+            <label>Claim Code</label>
+            <input value={claimCode} onChange={(e) => setClaimCode(e.target.value)} />
+          </div>
+          <button onClick={claimAgent}>Claim</button>
+          {claimResult && <div className="result">claim ok</div>}
+
+          <div className="field">
+            <label>Status API Key</label>
+            <input value={statusKey} onChange={(e) => setStatusKey(e.target.value)} />
+          </div>
+          <button onClick={checkStatus}>Check Status</button>
+          {statusResult && <div className="result">status: {statusResult.status}</div>}
         </div>
 
         <div className="card logs">

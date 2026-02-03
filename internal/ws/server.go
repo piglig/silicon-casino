@@ -3,7 +3,6 @@ package ws
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"math/rand"
 	"net/http"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/rs/zerolog/log"
 
 	"silicon-casino/internal/game"
 	"silicon-casino/internal/ledger"
@@ -135,7 +135,7 @@ func (s *Server) writeLoop(c *Client) {
 func (s *Server) handleJoin(c *Client, join JoinMessage) {
 	agent, err := s.store.GetAgentByAPIKey(context.Background(), join.APIKey)
 	if err != nil {
-		s.sendJoinResult(c, false, "invalid_action", "")
+		s.sendJoinResult(c, false, "invalid_api_key", "")
 		return
 	}
 	c.agent = agent
@@ -262,7 +262,21 @@ func (s *Server) unregister(c *Client) {
 		delete(s.spectators, c)
 	}
 	s.mu.Unlock()
-	close(c.send)
+	safeClose(c.send)
+}
+
+func safeClose(ch chan []byte) {
+	defer func() {
+		_ = recover()
+	}()
+	close(ch)
+}
+
+func safeSend(ch chan []byte, msg []byte) {
+	defer func() {
+		_ = recover()
+	}()
+	ch <- msg
 }
 
 func (s *Server) sendJoinResult(c *Client, ok bool, errCode, roomID string) {
@@ -276,6 +290,9 @@ func (ts *TableSession) run(s *Server) {
 		p1 := ts.players[0]
 		p2 := ts.players[1]
 		if p1 == nil || p2 == nil {
+			s.mu.Lock()
+			delete(s.sessions, ts.id)
+			s.mu.Unlock()
 			return
 		}
 		players := [2]*game.Player{
@@ -284,10 +301,10 @@ func (ts *TableSession) run(s *Server) {
 		}
 		started := time.Now()
 		if err := ts.engine.StartHand(ctx, players[0], players[1], ts.room.SmallBlindCC, ts.room.BigBlindCC); err != nil {
-			log.Println("start hand error", err)
+			log.Error().Err(err).Msg("start hand error")
 			return
 		}
-		log.Println("hand_start", ts.engine.State.HandID, "room", ts.room.Name)
+		log.Info().Str("hand_id", ts.engine.State.HandID).Str("room", ts.room.Name).Msg("hand_start")
 
 		handOver := false
 		for !handOver {
@@ -299,8 +316,8 @@ func (ts *TableSession) run(s *Server) {
 				if env.Player != actor {
 					break
 				}
-				log.Println("action_received", env.Action.Type, "player", env.Player)
-				s.broadcastEventLog(actor, env.Action.Type, env.Action.Amount, env.Log, "action", s)
+				log.Info().Str("action", string(env.Action.Type)).Int("player", env.Player).Msg("action_received")
+				ts.broadcastEventLog(actor, env.Action.Type, env.Action.Amount, env.Log, "action", s)
 				done, err := ts.engine.ApplyAction(ctx, env.Action)
 				if err != nil {
 					ts.sendActionResult(actor, false, mapError(err))
@@ -312,14 +329,15 @@ func (ts *TableSession) run(s *Server) {
 				}
 			case <-timeout.C:
 				_, _ = ts.engine.ApplyAction(ctx, game.Action{Player: actor, Type: game.ActionFold})
-				s.metricsIncTimeouts(s)
-				s.broadcastEventLog(actor, game.ActionFold, 0, "", "timeout", s)
+				ts.metricsIncTimeouts(s)
+				ts.broadcastEventLog(actor, game.ActionFold, 0, "", "timeout", s)
 				handOver = ts.handleRoundEnd(ctx, s)
 			}
 			timeout.Stop()
 		}
 		_ = s.store.EndHand(ctx, ts.engine.State.HandID)
 		ts.metricsHandEnd(s, started)
+		ts.kickIfBelowMinBuyin(s)
 	}
 }
 
@@ -355,14 +373,14 @@ func (ts *TableSession) broadcastState(s *Server) {
 	msg1, _ := json.Marshal(ts.engine.State.SnapshotFor(1, true))
 	msg0Public, _ := json.Marshal(ts.engine.State.SnapshotFor(0, false))
 
-	p0.send <- msg0
-	p1.send <- msg1
+	safeSend(p0.send, msg0)
+	safeSend(p1.send, msg1)
 
 	s.mu.Lock()
 	for c := range s.spectators {
 		if c != nil {
 			if c.spectateRoom == "" || c.spectateRoom == ts.room.ID {
-				c.send <- msg0Public
+				safeSend(c.send, msg0Public)
 			}
 		}
 	}
@@ -379,7 +397,7 @@ func (ts *TableSession) broadcastHandEnd(winner string, s *Server) {
 	msgPlayers, _ := json.Marshal(HandEnd{Type: "hand_end", ProtocolVersion: game.ProtocolVersion, Winner: winner, Pot: ts.engine.State.Pot, Balances: balances})
 	for _, p := range ts.players {
 		if p != nil {
-			p.send <- msgPlayers
+			safeSend(p.send, msgPlayers)
 		}
 	}
 	showdown := []ShowdownHand{}
@@ -395,10 +413,36 @@ func (ts *TableSession) broadcastHandEnd(winner string, s *Server) {
 	s.mu.Lock()
 	for c := range s.spectators {
 		if c.spectateRoom == "" || c.spectateRoom == ts.room.ID {
-			c.send <- msgSpectators
+			safeSend(c.send, msgSpectators)
 		}
 	}
 	s.mu.Unlock()
+}
+
+func (ts *TableSession) kickIfBelowMinBuyin(s *Server) {
+	for idx, c := range ts.players {
+		if c == nil || c.agent == nil {
+			continue
+		}
+		stack := ts.engine.State.Players[idx].Stack
+		if stack >= ts.room.MinBuyinCC {
+			continue
+		}
+		log.Info().Str("agent_id", c.agent.ID).Str("room", ts.room.Name).Int64("balance_cc", stack).Msg("kick_insufficient_buyin")
+		s.kickClient(ts, idx, c)
+	}
+}
+
+func (s *Server) kickClient(ts *TableSession, idx int, c *Client) {
+	s.mu.Lock()
+	if c.agent != nil && s.byAgentID[c.agent.ID] == c {
+		delete(s.byAgentID, c.agent.ID)
+	}
+	s.mu.Unlock()
+	ts.players[idx] = nil
+	c.session = nil
+	safeClose(c.send)
+	_ = c.conn.Close()
 }
 
 func (ts *TableSession) sendActionResult(playerIdx int, ok bool, errStr string) {
@@ -407,7 +451,7 @@ func (ts *TableSession) sendActionResult(playerIdx int, ok bool, errStr string) 
 		return
 	}
 	msg, _ := json.Marshal(ActionResult{Type: "action_result", ProtocolVersion: game.ProtocolVersion, Ok: ok, Error: errStr})
-	p.send <- msg
+	safeSend(p.send, msg)
 }
 
 func (ts *TableSession) broadcastEventLog(playerIdx int, action game.ActionType, amount int64, thoughtLog, event string, s *Server) {
@@ -423,13 +467,13 @@ func (ts *TableSession) broadcastEventLog(playerIdx int, action game.ActionType,
 	})
 	for _, p := range ts.players {
 		if p != nil {
-			p.send <- msg
+			safeSend(p.send, msg)
 		}
 	}
 	s.mu.Lock()
 	for c := range s.spectators {
 		if c.spectateRoom == "" || c.spectateRoom == ts.room.ID {
-			c.send <- msg
+			safeSend(c.send, msg)
 		}
 	}
 	s.mu.Unlock()
@@ -446,7 +490,13 @@ func (ts *TableSession) metricsHandEnd(s *Server, started time.Time) {
 	duration := time.Since(started)
 	s.metricsMu.Lock()
 	s.handsPlayed++
-	log.Println("hand_end", ts.engine.State.HandID, "duration_ms", duration.Milliseconds(), "hands_played", s.handsPlayed, "timeouts", s.timeouts, "folds", s.folds)
+	log.Info().
+		Str("hand_id", ts.engine.State.HandID).
+		Int64("duration_ms", duration.Milliseconds()).
+		Int64("hands_played", s.handsPlayed).
+		Int64("timeouts", s.timeouts).
+		Int64("folds", s.folds).
+		Msg("hand_end")
 	s.metricsMu.Unlock()
 }
 

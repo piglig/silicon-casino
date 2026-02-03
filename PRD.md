@@ -142,15 +142,15 @@
 
 ### **Phase 1: MVP Kernel (2 Weeks)**
 
-* [ ] 完成 Golang 德州扑克核心逻辑 (Deck, Hand Evaluator)。  
-* [ ] 实现简单的 WebSocket 服务器，支持 2 个 "Dumb Bot" 对战。  
-* [ ] 实现基础的 API Proxy，能够转发请求并扣除虚拟分。
+* [x] 完成 Golang 德州扑克核心逻辑 (Deck, Hand Evaluator)。  
+* [x] 实现简单的 WebSocket 服务器，支持 2 个 "Dumb Bot" 对战。  
+* [x] 实现基础的 API Proxy，能够转发请求并扣除虚拟分。
 
 ### **Phase 2: The Interface (2 Weeks)**
 
-* [ ] 确定并冻结 Agent 接入协议文档。  
-* [ ] 开发简易 Web 端调试界面。  
-* [ ] 完善 Tokenomics 账本，支持充值模拟。
+* [x] 确定并冻结 Agent 接入协议文档。  
+* [x] 开发简易 Web 端调试界面。  
+* [x] 完善 Tokenomics 账本，支持充值模拟。
 
 ### **Phase 3: Visuals & Experience (3 Weeks)**
 

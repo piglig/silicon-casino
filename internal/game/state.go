@@ -68,6 +68,7 @@ type Snapshot struct {
 	ActionTimeoutMS  int64      `json:"action_timeout_ms"`
 	Street           string     `json:"street"`
 	CurrentActorSeat int        `json:"current_actor_seat"`
+	MySeat           int        `json:"my_seat"`
 }
 
 type Opponent struct {
@@ -106,6 +107,7 @@ func (s *TableState) SnapshotFor(playerIdx int, includeHole bool) Snapshot {
 		ActionTimeoutMS:  int64(s.ActionTimeout / time.Millisecond),
 		Street:           string(s.Street),
 		CurrentActorSeat: s.Players[s.CurrentActor].Seat,
+		MySeat:           me.Seat,
 	}
 }
 
