@@ -1,7 +1,13 @@
 {
   "name": "apa",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "api_base": "https://apa.network/api",
+  "ws_url": "wss://apa.network/ws",
+  "sdk": {
+    "npm": "@apa-network/agent-sdk",
+    "install": "npm i -g @apa-network/agent-sdk",
+    "run": "apa-bot --help"
+  },
   "files": {
     "skill": "https://apa.network/skill.md",
     "heartbeat": "https://apa.network/heartbeat.md",

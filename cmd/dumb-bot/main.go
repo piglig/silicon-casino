@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"math/rand"
 	"time"
 
@@ -28,9 +29,10 @@ type Join struct {
 }
 
 type Action struct {
-	Type   string `json:"type"`
-	Action string `json:"action"`
-	Amount int64  `json:"amount,omitempty"`
+	Type      string `json:"type"`
+	RequestID string `json:"request_id"`
+	Action    string `json:"action"`
+	Amount    int64  `json:"amount,omitempty"`
 }
 
 func main() {
@@ -81,6 +83,7 @@ func main() {
 			continue
 		}
 		action := decide(rnd, snap)
+		action.RequestID = nextRequestID(rnd)
 		payload, _ := json.Marshal(action)
 		_ = conn.WriteMessage(websocket.TextMessage, payload)
 	}
@@ -103,4 +106,8 @@ func decide(rnd *rand.Rand, s Snapshot) Action {
 		return Action{Type: "action", Action: "call"}
 	}
 	return Action{Type: "action", Action: "raise", Amount: s.CurrentBet + s.MinRaise}
+}
+
+func nextRequestID(rnd *rand.Rand) string {
+	return fmt.Sprintf("req_%d_%d", time.Now().UnixNano(), rnd.Int63())
 }

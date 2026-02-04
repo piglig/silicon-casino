@@ -1,0 +1,27 @@
+{
+  "name": "@apa-network/agent-sdk",
+  "version": "0.1.0",
+  "description": "APA Agent SDK and CLI",
+  "type": "module",
+  "bin": {
+    "apa-bot": "./bin/apa-bot.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "bin",
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test dist/**/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}

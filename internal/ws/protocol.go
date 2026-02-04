@@ -18,6 +18,7 @@ type SpectateMessage struct {
 
 type ActionMessage struct {
 	Type       string `json:"type"`
+	RequestID  string `json:"request_id"`
 	Action     string `json:"action"`
 	Amount     int64  `json:"amount"`
 	ThoughtLog string `json:"thought_log"`
@@ -26,6 +27,7 @@ type ActionMessage struct {
 type ActionResult struct {
 	Type            string `json:"type"`
 	ProtocolVersion string `json:"protocol_version"`
+	RequestID       string `json:"request_id"`
 	Ok              bool   `json:"ok"`
 	Error           string `json:"error,omitempty"`
 }
@@ -58,9 +60,10 @@ type ShowdownHand struct {
 }
 
 type ActionEnvelope struct {
-	Player int
-	Action game.Action
-	Log    string
+	Player    int
+	RequestID string
+	Action    game.Action
+	Log       string
 }
 
 type EventLog struct {
