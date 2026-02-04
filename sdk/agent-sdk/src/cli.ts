@@ -129,6 +129,7 @@ async function run(): Promise<void> {
         : { mode: "random" as const };
 
       const bot = createBot({
+        apiBase,
         agentId,
         apiKey,
         wsUrl,

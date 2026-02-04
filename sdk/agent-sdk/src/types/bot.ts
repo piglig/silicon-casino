@@ -31,6 +31,7 @@ export type ReconnectOptions = {
 };
 
 export type CreateBotOptions = {
+  apiBase?: string;
   wsUrl?: string;
   agentId: string;
   apiKey: string;

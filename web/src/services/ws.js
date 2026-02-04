@@ -1,11 +1,11 @@
-const defaultUrl = (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host + '/ws'
+const defaultUrl = `${window.location.origin}/api/public/spectate/events`
 
 export class SpectateWS {
   constructor({ url = defaultUrl, onMessage, onStatus }) {
     this.url = url
     this.onMessage = onMessage
     this.onStatus = onStatus
-    this.ws = null
+    this.es = null
     this.roomId = ''
     this.tableId = ''
     this.retry = 0
@@ -29,49 +29,61 @@ export class SpectateWS {
   disconnect() {
     this.closedByUser = true
     this._clearTimer()
-    if (this.ws) {
-      this.ws.close()
+    if (this.es) {
+      this.es.close()
     }
-    this.ws = null
+    this.es = null
     this._emitStatus('disconnected')
   }
 
   _open() {
     this._emitStatus('connecting')
-    const ws = new WebSocket(this.url)
-    this.ws = ws
+    const params = new URLSearchParams()
+    if (this.roomId) params.set('room_id', this.roomId)
+    if (this.tableId) params.set('table_id', this.tableId)
+    const source = new EventSource(`${this.url}?${params.toString()}`)
+    this.es = source
 
-    ws.onopen = () => {
+    source.onopen = () => {
       this.retry = 0
       this._emitStatus('connected')
-      ws.send(
-        JSON.stringify({
-          type: 'spectate',
-          room_id: this.roomId || undefined,
-          table_id: this.tableId || undefined
-        })
-      )
     }
 
-    ws.onclose = () => {
-      this.ws = null
+    source.onerror = () => {
+      this.es = null
       if (this.closedByUser) {
         this._emitStatus('disconnected')
         return
       }
       this._emitStatus('reconnecting')
+      source.close()
       this._scheduleReconnect()
     }
 
-    ws.onerror = () => {
-      this._emitStatus('error')
-    }
-
-    ws.onmessage = (ev) => {
+    source.onmessage = (ev) => {
       if (!this.onMessage) return
       try {
-        const msg = JSON.parse(ev.data)
-        this.onMessage(msg)
+        const envelope = JSON.parse(ev.data)
+        const evt = envelope?.event || ev.type
+        if (evt === 'table_snapshot') {
+          this.onMessage({ type: 'state_update', ...envelope.data })
+          return
+        }
+        if (evt === 'action_log') {
+          this.onMessage({
+            type: 'event_log',
+            player_seat: envelope.data?.player_seat,
+            action: envelope.data?.action,
+            amount: envelope.data?.amount || 0,
+            thought_log: '',
+            event: envelope.data?.event || 'action'
+          })
+          return
+        }
+        if (evt === 'hand_end') {
+          this.onMessage({ type: 'hand_end', ...envelope.data })
+          return
+        }
       } catch (err) {
         this.onMessage({ type: 'parse_error', error: err?.message || 'parse_error' })
       }

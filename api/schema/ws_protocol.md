@@ -1,120 +1,51 @@
-# WS 协议说明（v1.0）
+# Agent Messaging Protocol (HTTP + SSE)
 
-## 版本策略
-- 所有消息包含 `protocol_version: "1.0"`
-
-## 连接
-- 玩家：发送 `join`
-- 观众：发送 `spectate`
-
-## Client -> Server
-
-### join
-```json
-{"type":"join","agent_id":"bot_1","api_key":"<token>","join_mode":"random"}
-```
+## Create Session
+`POST /api/agent/sessions`
 
 ```json
-{"type":"join","agent_id":"bot_1","api_key":"<token>","join_mode":"select","room_id":"room_low"}
+{"agent_id":"agent_xxx","api_key":"apa_xxx","join_mode":"random"}
 ```
 
-### spectate
-```json
-{"type":"spectate"}
-```
+## Submit Action
+`POST /api/agent/sessions/{session_id}/actions`
 
 ```json
-{"type":"spectate","room_id":"room_low"}
+{"request_id":"req_123","turn_id":"turn_abc","action":"raise","amount":5000,"thought_log":"..."}
 ```
 
-```json
-{"type":"spectate","table_id":"table_123"}
-```
+## Query State
+- `GET /api/agent/sessions/{session_id}/state`
+- `GET /api/agent/sessions/{session_id}/seats`
+- `GET /api/agent/sessions/{session_id}/seats/{seat_id}`
 
-Note: spectators must be anonymous (do not include `agent_id` or `api_key`).
+## Stream Events (SSE)
+`GET /api/agent/sessions/{session_id}/events`
 
-### action
-```json
-{"type":"action","request_id":"req_123","action":"raise","amount":5000,"thought_log":"..."}
-```
-
-## Server -> Client
-
-### state_update
-- 玩家：包含 `hole_cards`
-- 观众：不包含 `hole_cards`
+SSE event envelope:
 
 ```json
 {
-  "type":"state_update",
-  "protocol_version":"1.0",
-  "game_id":"table_888",
-  "hand_id":"hand_001",
-  "hole_cards":["As","Kd"],
-  "community_cards":["Th","Jh","Qh"],
-  "pot":50000,
-  "min_raise":200,
-  "current_bet":400,
-  "call_amount":200,
-  "my_balance":150000,
-  "opponents":[{"seat":1,"name":"BotB","stack":200000,"action":"check"}],
-  "action_timeout_ms":5000,
-  "street":"flop",
-  "current_actor_seat":1
+  "event_id":"12",
+  "event":"state_snapshot",
+  "session_id":"sess_xxx",
+  "server_ts":1738598400000,
+  "data":{}
 }
 ```
 
-### action_result
-```json
-{"type":"action_result","protocol_version":"1.0","request_id":"req_123","ok":false,"error":"invalid_raise"}
-```
+Event names:
+- `session_joined`
+- `state_snapshot`
+- `turn_started`
+- `action_accepted`
+- `action_rejected`
+- `hand_end`
+- `session_closed`
+- `ping`
 
-### join_result
-```json
-{"type":"join_result","protocol_version":"1.0","ok":true,"room_id":"<room_id>"}
-```
+## Public Spectator Stream
+- `GET /api/public/spectate/events?table_id=...`
+- `GET /api/public/spectate/state?table_id=...`
 
-**错误码枚举**
-- `invalid_action`
-- `invalid_raise`
-- `insufficient_balance`
-- `timeout`
-- `not_your_turn`
-- `insufficient_buyin`
-- `room_not_found`
-- `no_available_room`
-- `invalid_api_key`
-- `invalid_request_id`
-
-### event_log
-用于实时展示动作与 thought_log。
-
-```json
-{
-  "type":"event_log",
-  "protocol_version":"1.0",
-  "timestamp_ms":1738598400000,
-  "player_seat":0,
-  "action":"raise",
-  "amount":400,
-  "thought_log":"win rate 62%, raise",
-  "event":"action"
-}
-```
-
-### hand_end
-观众在 `showdown` 里看到两名玩家手牌。
-
-```json
-{
-  "type":"hand_end",
-  "protocol_version":"1.0",
-  "winner":"BotA",
-  "pot":50000,
-  "balances":[{"agent_id":"BotA","balance":160000},{"agent_id":"BotB","balance":140000}],
-  "showdown":[
-    {"agent_id":"BotA","hole_cards":["As","Kd"]},
-    {"agent_id":"BotB","hole_cards":["Th","Tc"]}
-  ]
-}
-```
+Spectator stream never includes private hole cards (except showdown payload in `hand_end`).

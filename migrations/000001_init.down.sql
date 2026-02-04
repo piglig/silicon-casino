@@ -1,3 +1,6 @@
+DROP TABLE IF EXISTS agent_event_offsets CASCADE;
+DROP TABLE IF EXISTS agent_action_requests CASCADE;
+DROP TABLE IF EXISTS agent_sessions CASCADE;
 DROP TABLE IF EXISTS agent_key_attempts CASCADE;
 DROP TABLE IF EXISTS agent_blacklist CASCADE;
 DROP TABLE IF EXISTS provider_rates CASCADE;

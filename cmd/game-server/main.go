@@ -11,11 +11,12 @@ import (
 	"sync"
 	"time"
 
+	"silicon-casino/internal/agentgateway"
 	"silicon-casino/internal/config"
 	"silicon-casino/internal/ledger"
 	"silicon-casino/internal/logging"
+	"silicon-casino/internal/spectatorgateway"
 	"silicon-casino/internal/store"
-	"silicon-casino/internal/ws"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -53,23 +54,38 @@ func main() {
 	if err := st.EnsureDefaultProviderRates(context.Background(), defaultProviderRates(cfg)); err != nil {
 		log.Fatal().Err(err).Msg("ensure provider rates failed")
 	}
-	srv := ws.NewServer(st, led)
+	agentCoord := agentgateway.NewCoordinator(st, led)
+	r := newRouter(st, cfg, agentCoord)
 
+	server := &http.Server{Addr: cfg.WSAddr, Handler: r, ReadHeaderTimeout: 5 * time.Second}
+	log.Info().Str("addr", cfg.WSAddr).Msg("ws listening")
+	log.Fatal().Err(server.ListenAndServe()).Msg("server stopped")
+}
+
+func newRouter(st *store.Store, cfg config.ServerConfig, agentCoord *agentgateway.Coordinator) http.Handler {
 	r := chi.NewRouter()
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.RealIP)
 
 	r.Get("/healthz", healthHandler(st))
-	r.HandleFunc("/ws", srv.HandleWS)
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/public/leaderboard", publicLeaderboardHandler(st))
 		r.Get("/public/rooms", publicRoomsHandler(st))
 		r.Get("/public/tables", publicTablesHandler(st))
-		r.Get("/public/agent-table", publicAgentTableHandler(srv))
+		r.Get("/public/agent-table", publicAgentTableHandler(agentCoord))
+		r.Get("/public/spectate/events", spectatorgateway.EventsHandler(agentCoord))
+		r.Get("/public/spectate/state", spectatorgateway.StateHandler(agentCoord))
 
 		r.Post("/agents/register", registerAgentHandler(st))
 		r.Post("/agents/claim", claimAgentHandler(st))
+		r.Post("/agent/sessions", agentgateway.SessionsCreateHandler(agentCoord))
+		r.Delete("/agent/sessions/{session_id}", agentgateway.SessionsDeleteHandler(agentCoord))
+		r.Post("/agent/sessions/{session_id}/actions", agentgateway.ActionsHandler(agentCoord))
+		r.Get("/agent/sessions/{session_id}/state", agentgateway.StateHandler(agentCoord))
+		r.Get("/agent/sessions/{session_id}/seats", agentgateway.SeatsHandler(agentCoord))
+		r.Get("/agent/sessions/{session_id}/seats/{seat_id}", agentgateway.SeatByIDHandler(agentCoord))
+		r.Get("/agent/sessions/{session_id}/events", agentgateway.EventsSSEHandler(agentCoord))
 
 		r.Group(func(r chi.Router) {
 			r.Use(agentAuthMiddleware(st))
@@ -103,10 +119,7 @@ func main() {
 
 	staticDir := filepath.Join("internal", "ws", "static")
 	r.Handle("/*", http.FileServer(http.Dir(staticDir)))
-
-	server := &http.Server{Addr: cfg.WSAddr, Handler: r, ReadHeaderTimeout: 5 * time.Second}
-	log.Info().Str("addr", cfg.WSAddr).Msg("ws listening")
-	log.Fatal().Err(server.ListenAndServe()).Msg("server stopped")
+	return r
 }
 
 func seedAgent(st *store.Store, name, key string, initial int64) {
@@ -371,14 +384,14 @@ func publicTablesHandler(st *store.Store) http.HandlerFunc {
 	}
 }
 
-func publicAgentTableHandler(srv *ws.Server) http.HandlerFunc {
+func publicAgentTableHandler(coord *agentgateway.Coordinator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentID := r.URL.Query().Get("agent_id")
 		if agentID == "" {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		tableID, roomID, ok := srv.FindTableByAgent(agentID)
+		tableID, roomID, ok := coord.FindTableByAgent(agentID)
 		if !ok {
 			w.WriteHeader(http.StatusNotFound)
 			return

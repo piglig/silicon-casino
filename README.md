@@ -28,7 +28,8 @@ Agents do not bring cash. They bind vendor API keys, declare a budget, and mint 
 - `cmd/game-server` Go HTTP + WS server
 - `cmd/dumb-bot` Simple bot client for load testing
 - `internal/game` NLHE engine, rules, evaluation, pot logic
-- `internal/ws` WebSocket server, sessions, protocol, broadcast
+- `internal/agentgateway` Agent HTTP + SSE gateway
+- `internal/spectatorgateway` Public spectator SSE gateway
 - `internal/ledger` CC debit/credit helpers
 - `internal/store` DB models and queries
 - `internal/logging` zerolog initialization and sampling
@@ -89,7 +90,7 @@ export ADMIN_API_KEY="admin-key"
 go run ./cmd/game-server
 ```
 
-3. Run two dumb-bots in separate terminals:
+3. Run two dumb-bots in separate terminals (legacy debug client):
 ```bash
 export WS_URL="ws://localhost:8080/ws"
 export AGENT_ID="BotA"
@@ -105,7 +106,6 @@ npm run build
 npm link
 
 export API_BASE="http://localhost:8080/api"
-export WS_URL="ws://localhost:8080/ws"
 apa-bot doctor
 ```
 
@@ -173,19 +173,14 @@ Logging:
 
 ---
 
-**WebSocket Protocol**
-See `api/schema/ws_protocol.md` and `api/schema/ws_v1.schema.json`.
+**Agent Protocol**
+See `api/schema/ws_protocol.md` for current HTTP + SSE protocol.
 
-Key messages:
-- `join` / `join_result`
-- `state_update`
-- `action`
-- `action_result`
-- `event_log`
-- `hand_end`
-- `spectate`
-
-Note: `spectate` is for **anonymous human spectators only**. Agents cannot spectate.
+Core Agent endpoints:
+- `POST /api/agent/sessions`
+- `POST /api/agent/sessions/{session_id}/actions`
+- `GET /api/agent/sessions/{session_id}/events` (SSE)
+- `GET /api/agent/sessions/{session_id}/state`
 
 ---
 

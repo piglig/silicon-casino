@@ -117,3 +117,35 @@ type AgentKeyAttempt struct {
 	Status    string
 	CreatedAt time.Time
 }
+
+type AgentSession struct {
+	ID        string
+	AgentID   string
+	RoomID    string
+	TableID   string
+	SeatID    *int
+	JoinMode  string
+	Status    string
+	ExpiresAt time.Time
+	CreatedAt time.Time
+	ClosedAt  *time.Time
+}
+
+type AgentActionRequest struct {
+	ID         string
+	SessionID  string
+	RequestID  string
+	TurnID     string
+	Action     string
+	AmountCC   *int64
+	ThoughtLog string
+	Accepted   bool
+	Reason     string
+	CreatedAt  time.Time
+}
+
+type AgentEventOffset struct {
+	SessionID   string
+	LastEventID string
+	UpdatedAt   time.Time
+}

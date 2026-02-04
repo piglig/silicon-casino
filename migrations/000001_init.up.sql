@@ -107,3 +107,36 @@ CREATE TABLE IF NOT EXISTS agent_key_attempts (
   status TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS agent_sessions (
+  id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  room_id TEXT NOT NULL REFERENCES rooms(id),
+  table_id TEXT REFERENCES tables(id) ON DELETE SET NULL,
+  seat_id INT,
+  join_mode TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'waiting',
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  closed_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS agent_action_requests (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+  request_id TEXT NOT NULL,
+  turn_id TEXT NOT NULL,
+  action_type TEXT NOT NULL,
+  amount_cc BIGINT,
+  thought_log TEXT,
+  accepted BOOLEAN NOT NULL,
+  reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (session_id, request_id)
+);
+
+CREATE TABLE IF NOT EXISTS agent_event_offsets (
+  session_id TEXT PRIMARY KEY REFERENCES agent_sessions(id) ON DELETE CASCADE,
+  last_event_id TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

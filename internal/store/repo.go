@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"time"
 
 	"silicon-casino/internal/store/sqlcgen"
@@ -637,4 +638,136 @@ func anyToInt64(v any) int64 {
 	default:
 		return 0
 	}
+}
+
+func (s *Store) CreateAgentSession(ctx context.Context, sess AgentSession) error {
+	_, err := s.Pool.Exec(ctx, `
+		INSERT INTO agent_sessions (id, agent_id, room_id, table_id, seat_id, join_mode, status, expires_at)
+		VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, $8)
+	`, sess.ID, sess.AgentID, sess.RoomID, sess.TableID, sess.SeatID, sess.JoinMode, sess.Status, sess.ExpiresAt)
+	return err
+}
+
+func (s *Store) GetAgentSession(ctx context.Context, sessionID string) (*AgentSession, error) {
+	var out AgentSession
+	var seatID *int
+	var tableID *string
+	var closedAt *time.Time
+	err := s.Pool.QueryRow(ctx, `
+		SELECT id, agent_id, room_id, table_id, seat_id, join_mode, status, expires_at, created_at, closed_at
+		FROM agent_sessions
+		WHERE id = $1
+	`, sessionID).Scan(
+		&out.ID, &out.AgentID, &out.RoomID, &tableID, &seatID, &out.JoinMode, &out.Status, &out.ExpiresAt, &out.CreatedAt, &closedAt,
+	)
+	if err != nil {
+		return nil, mapNotFound(err)
+	}
+	if tableID != nil {
+		out.TableID = *tableID
+	}
+	out.SeatID = seatID
+	out.ClosedAt = closedAt
+	return &out, nil
+}
+
+func (s *Store) UpdateAgentSessionMatch(ctx context.Context, sessionID, tableID string, seatID int) error {
+	cmd, err := s.Pool.Exec(ctx, `
+		UPDATE agent_sessions
+		SET table_id = $2, seat_id = $3, status = 'active'
+		WHERE id = $1
+	`, sessionID, tableID, seatID)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) CloseAgentSession(ctx context.Context, sessionID string) error {
+	cmd, err := s.Pool.Exec(ctx, `
+		UPDATE agent_sessions
+		SET status = 'closed', closed_at = now()
+		WHERE id = $1 AND status <> 'closed'
+	`, sessionID)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) InsertAgentActionRequest(ctx context.Context, req AgentActionRequest) (bool, error) {
+	if req.ID == "" {
+		req.ID = NewID()
+	}
+	cmd, err := s.Pool.Exec(ctx, `
+		INSERT INTO agent_action_requests (id, session_id, request_id, turn_id, action_type, amount_cc, thought_log, accepted, reason)
+		VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8, NULLIF($9, ''))
+		ON CONFLICT (session_id, request_id) DO NOTHING
+	`, req.ID, req.SessionID, req.RequestID, req.TurnID, req.Action, req.AmountCC, req.ThoughtLog, req.Accepted, req.Reason)
+	if err != nil {
+		return false, err
+	}
+	return cmd.RowsAffected() > 0, nil
+}
+
+func (s *Store) GetAgentActionRequest(ctx context.Context, sessionID, requestID string) (*AgentActionRequest, error) {
+	var out AgentActionRequest
+	var amount *int64
+	var thought *string
+	var reason *string
+	err := s.Pool.QueryRow(ctx, `
+		SELECT id, session_id, request_id, turn_id, action_type, amount_cc, thought_log, accepted, reason, created_at
+		FROM agent_action_requests
+		WHERE session_id = $1 AND request_id = $2
+	`, sessionID, requestID).Scan(
+		&out.ID, &out.SessionID, &out.RequestID, &out.TurnID, &out.Action, &amount, &thought, &out.Accepted, &reason, &out.CreatedAt,
+	)
+	if err != nil {
+		return nil, mapNotFound(err)
+	}
+	out.AmountCC = amount
+	if thought != nil {
+		out.ThoughtLog = *thought
+	}
+	if reason != nil {
+		out.Reason = *reason
+	}
+	return &out, nil
+}
+
+func (s *Store) UpsertAgentEventOffset(ctx context.Context, sessionID, lastEventID string) error {
+	_, err := s.Pool.Exec(ctx, `
+		INSERT INTO agent_event_offsets (session_id, last_event_id)
+		VALUES ($1, $2)
+		ON CONFLICT (session_id)
+		DO UPDATE SET last_event_id = EXCLUDED.last_event_id, updated_at = now()
+	`, sessionID, lastEventID)
+	return err
+}
+
+func (s *Store) GetAgentEventOffset(ctx context.Context, sessionID string) (*AgentEventOffset, error) {
+	var out AgentEventOffset
+	err := s.Pool.QueryRow(ctx, `
+		SELECT session_id, last_event_id, updated_at
+		FROM agent_event_offsets
+		WHERE session_id = $1
+	`, sessionID).Scan(&out.SessionID, &out.LastEventID, &out.UpdatedAt)
+	if err != nil {
+		return nil, mapNotFound(err)
+	}
+	return &out, nil
+}
+
+func (s *Store) DebugSessionCount(ctx context.Context) (int, error) {
+	var count int
+	if err := s.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM agent_sessions`).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count sessions: %w", err)
+	}
+	return count, nil
 }

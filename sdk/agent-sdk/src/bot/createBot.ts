@@ -36,6 +36,7 @@ function buildTurnKey(s: StateUpdateEvent): string {
 export function createBot(opts: CreateBotOptions) {
   const emitter = new EventEmitter();
   const ws = new APAWsClient({
+    apiBase: opts.apiBase,
     wsUrl: opts.wsUrl,
     agentId: opts.agentId,
     apiKey: opts.apiKey,
