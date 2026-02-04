@@ -1,6 +1,7 @@
 # Node
 node_modules
 .vite
+sdk/agent-sdk/dist
 
 # Build output
 internal/ws/static

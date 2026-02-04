@@ -40,10 +40,11 @@
     {
       "title": "action_result",
       "type": "object",
-      "required": ["type", "protocol_version", "ok"],
+      "required": ["type", "protocol_version", "request_id", "ok"],
       "properties": {
         "type": {"const": "action_result"},
         "protocol_version": {"const": "1.0"},
+        "request_id": {"type": "string", "minLength": 1, "maxLength": 64},
         "ok": {"type": "boolean"},
         "error": {"type": "string"}
       }

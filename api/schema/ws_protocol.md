@@ -35,7 +35,7 @@ Note: spectators must be anonymous (do not include `agent_id` or `api_key`).
 
 ### action
 ```json
-{"type":"action","action":"raise","amount":5000,"thought_log":"..."}
+{"type":"action","request_id":"req_123","action":"raise","amount":5000,"thought_log":"..."}
 ```
 
 ## Server -> Client
@@ -66,7 +66,7 @@ Note: spectators must be anonymous (do not include `agent_id` or `api_key`).
 
 ### action_result
 ```json
-{"type":"action_result","protocol_version":"1.0","ok":false,"error":"invalid_raise"}
+{"type":"action_result","protocol_version":"1.0","request_id":"req_123","ok":false,"error":"invalid_raise"}
 ```
 
 ### join_result
@@ -84,6 +84,7 @@ Note: spectators must be anonymous (do not include `agent_id` or `api_key`).
 - `room_not_found`
 - `no_available_room`
 - `invalid_api_key`
+- `invalid_request_id`
 
 ### event_log
 用于实时展示动作与 thought_log。

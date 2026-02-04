@@ -18,13 +18,13 @@ import (
 )
 
 type Client struct {
-	conn         *websocket.Conn
-	send         chan []byte
-	role         string
-	playerIdx    int
-	agent        *store.Agent
-	session      *TableSession
-	spectateRoom string
+	conn          *websocket.Conn
+	send          chan []byte
+	role          string
+	playerIdx     int
+	agent         *store.Agent
+	session       *TableSession
+	spectateRoom  string
 	spectateTable string
 }
 
@@ -137,14 +137,47 @@ func (s *Server) readLoop(c *Client) {
 			if c.role != "player" || c.session == nil {
 				continue
 			}
-			var action ActionMessage
-			if err := json.Unmarshal(msg, &action); err != nil {
-				continue
-			}
-			a := game.Action{Player: c.playerIdx, Type: game.ActionType(action.Action), Amount: action.Amount}
-			c.session.actionCh <- ActionEnvelope{Player: c.playerIdx, Action: a, Log: action.ThoughtLog}
+			s.handleAction(c, msg)
 		}
 	}
+}
+
+func (s *Server) handleAction(c *Client, msg []byte) {
+	if c == nil || c.session == nil {
+		return
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(msg, &raw); err != nil {
+		return
+	}
+	requestID := parseRequestID(raw)
+	if !isValidRequestID(requestID) {
+		c.session.sendActionResult(c.playerIdx, false, "invalid_request_id", requestID)
+		return
+	}
+
+	var action ActionMessage
+	if err := json.Unmarshal(msg, &action); err != nil {
+		return
+	}
+	a := game.Action{Player: c.playerIdx, Type: game.ActionType(action.Action), Amount: action.Amount}
+	c.session.actionCh <- ActionEnvelope{Player: c.playerIdx, RequestID: requestID, Action: a, Log: action.ThoughtLog}
+}
+
+func parseRequestID(raw map[string]any) string {
+	v, ok := raw["request_id"]
+	if !ok {
+		return ""
+	}
+	s, ok := v.(string)
+	if !ok {
+		return ""
+	}
+	return s
+}
+
+func isValidRequestID(requestID string) bool {
+	return len(requestID) >= 1 && len(requestID) <= 64
 }
 
 func (s *Server) writeLoop(c *Client) {
@@ -335,16 +368,17 @@ func (ts *TableSession) run(s *Server) {
 			select {
 			case env := <-ts.actionCh:
 				if env.Player != actor {
+					ts.sendActionResult(env.Player, false, "not_your_turn", env.RequestID)
 					break
 				}
 				log.Info().Str("action", string(env.Action.Type)).Int("player", env.Player).Msg("action_received")
 				ts.broadcastEventLog(actor, env.Action.Type, env.Action.Amount, env.Log, "action", s)
 				done, err := ts.engine.ApplyAction(ctx, env.Action)
 				if err != nil {
-					ts.sendActionResult(actor, false, mapError(err))
+					ts.sendActionResult(actor, false, mapError(err), env.RequestID)
 					break
 				}
-				ts.sendActionResult(actor, true, "")
+				ts.sendActionResult(actor, true, "", env.RequestID)
 				if done {
 					handOver = ts.handleRoundEnd(ctx, s)
 				}
@@ -466,12 +500,12 @@ func (s *Server) kickClient(ts *TableSession, idx int, c *Client) {
 	_ = c.conn.Close()
 }
 
-func (ts *TableSession) sendActionResult(playerIdx int, ok bool, errStr string) {
+func (ts *TableSession) sendActionResult(playerIdx int, ok bool, errStr, requestID string) {
 	p := ts.players[playerIdx]
 	if p == nil {
 		return
 	}
-	msg, _ := json.Marshal(ActionResult{Type: "action_result", ProtocolVersion: game.ProtocolVersion, Ok: ok, Error: errStr})
+	msg, _ := json.Marshal(ActionResult{Type: "action_result", ProtocolVersion: game.ProtocolVersion, RequestID: requestID, Ok: ok, Error: errStr})
 	safeSend(p.send, msg)
 }
 

@@ -25,7 +25,7 @@ func TestWSProtocolSchema(t *testing.T) {
 
 	samples := []string{
 		`{"type":"state_update","protocol_version":"1.0","game_id":"table","hand_id":"hand","community_cards":[],"pot":0,"min_raise":200,"my_balance":1000,"opponents":[],"action_timeout_ms":5000,"street":"preflop","current_actor_seat":0}`,
-		`{"type":"action_result","protocol_version":"1.0","ok":true}`,
+		`{"type":"action_result","protocol_version":"1.0","request_id":"req_1","ok":true}`,
 		`{"type":"event_log","protocol_version":"1.0","timestamp_ms":1,"player_seat":0,"action":"check","event":"action"}`,
 		`{"type":"hand_end","protocol_version":"1.0","winner":"p1","pot":100,"balances":[{"agent_id":"p1","balance":200}]}`,
 	}
