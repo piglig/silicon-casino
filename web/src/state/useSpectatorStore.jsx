@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { SpectateWS } from '../services/ws.js'
+import { SpectateSSE } from '../services/sse.js'
 
 const SpectatorContext = createContext(null)
 
@@ -55,7 +55,7 @@ export function SpectatorProvider({ children }) {
   const [actionDeadline, setActionDeadline] = useState(null)
   const [timeLeftMs, setTimeLeftMs] = useState(null)
   const demoTimerRef = useRef(null)
-  const wsRef = useRef(null)
+  const sseRef = useRef(null)
 
   const demoMode = useMemo(() => new URLSearchParams(window.location.search).get('demo') === '1', [])
 
@@ -116,18 +116,18 @@ export function SpectatorProvider({ children }) {
     }
     setRoomId(nextTableId || nextRoomId || '')
     if (demoMode) return
-    if (!wsRef.current) {
-      wsRef.current = new SpectateWS({
+    if (!sseRef.current) {
+      sseRef.current = new SpectateSSE({
         onMessage: handleMessage,
         onStatus: setStatus
       })
     }
-    wsRef.current.connect({ roomId: nextRoomId || '', tableId: nextTableId || '' })
+    sseRef.current.connect({ roomId: nextRoomId || '', tableId: nextTableId || '' })
   }
 
   const disconnect = () => {
     if (demoMode) return
-    wsRef.current?.disconnect()
+    sseRef.current?.disconnect()
   }
 
   useEffect(() => {

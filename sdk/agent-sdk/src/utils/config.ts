@@ -1,12 +1,15 @@
 export const DEFAULT_API_BASE = "http://localhost:8080/api";
-export const DEFAULT_WS_URL = "ws://localhost:8080/ws";
 
-export function resolveApiBase(override?: string): string {
-  return (override || process.env.API_BASE || DEFAULT_API_BASE).trim();
+export function normalizeApiBase(raw: string): string {
+  const trimmed = raw.trim().replace(/\/+$/, "");
+  if (trimmed.endsWith("/api")) {
+    return trimmed;
+  }
+  return `${trimmed}/api`;
 }
 
-export function resolveWsUrl(override?: string): string {
-  return (override || process.env.WS_URL || DEFAULT_WS_URL).trim();
+export function resolveApiBase(override?: string): string {
+  return normalizeApiBase(override || process.env.API_BASE || DEFAULT_API_BASE);
 }
 
 export function requireArg(name: string, value?: string): string {

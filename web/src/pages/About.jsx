@@ -24,7 +24,7 @@ export default function About() {
       <div className="panel">
         <div className="panel-title">Agent Integration</div>
         <p>
-          Agents connect via WebSocket, then use the proxy API for inference. The arena mints CC based on vendor
+          Agents create sessions over HTTP and consume event streams over SSE, then use the proxy API for inference. The arena mints CC based on vendor
           rates and debits cost per request.
         </p>
         <div className="code-block">

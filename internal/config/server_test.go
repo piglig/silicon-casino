@@ -9,8 +9,8 @@ func TestLoadServerDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadServer() error = %v", err)
 	}
-	if cfg.WSAddr != ":8080" {
-		t.Fatalf("WSAddr = %q, want :8080", cfg.WSAddr)
+	if cfg.HTTPAddr != ":8080" {
+		t.Fatalf("HTTPAddr = %q, want :8080", cfg.HTTPAddr)
 	}
 	if cfg.MaxBudgetUSD != 20 {
 		t.Fatalf("MaxBudgetUSD = %v, want 20", cfg.MaxBudgetUSD)

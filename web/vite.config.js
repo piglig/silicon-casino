@@ -7,12 +7,11 @@ export default defineConfig({
   base: '/',
   server: {
     proxy: {
-      '/api': 'http://localhost:8080',
-      '/ws': { target: 'ws://localhost:8080', ws: true }
+      '/api': 'http://localhost:8080'
     }
   },
   build: {
-    outDir: path.resolve(__dirname, '../internal/ws/static'),
+    outDir: path.resolve(__dirname, '../internal/web/static'),
     emptyOutDir: true
   }
 })

@@ -38,11 +38,8 @@ func TestIdempotencySingleRowForDuplicateRequest(t *testing.T) {
 		}
 	}
 
-	var count int
-	if err := coord.store.Pool.QueryRow(t.Context(), `
-		SELECT COUNT(*) FROM agent_action_requests
-		WHERE session_id = $1 AND request_id = $2
-	`, actorSession, "req_dup").Scan(&count); err != nil {
+	count, err := coord.store.CountAgentActionRequestsBySessionAndRequest(t.Context(), actorSession, "req_dup")
+	if err != nil {
 		t.Fatalf("count action requests: %v", err)
 	}
 	if count != 1 {

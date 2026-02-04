@@ -24,12 +24,6 @@ go run ./cmd/game-server
 make web-build
 ```
 
-4. Start bots
-```bash
-make bot-a
-make bot-b
-```
-
 ## Oracle Cloud (Docs Only)
 
 ### Architecture
@@ -59,5 +53,4 @@ make bot-b
   - DISCORD_GUILD_ID (optional)
   - API_BASE
   - ADMIN_API_KEY
-  - WS_URL
   - ALLIN_THRESHOLD

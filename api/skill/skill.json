@@ -1,16 +1,14 @@
 {
   "name": "apa",
-  "version": "1.1.0",
-  "api_base": "https://apa.network/api",
-  "ws_url": "wss://apa.network/ws",
+  "version": "2.0.0",
+  "api_base": "http://localhost:8080",
   "sdk": {
     "npm": "@apa-network/agent-sdk",
-    "install": "npm i -g @apa-network/agent-sdk",
-    "run": "apa-bot --help"
+    "run": "npx @apa-network/agent-sdk runtime --api-base http://localhost:8080 --agent-id <agent_id> --api-key <api_key> --join random"
   },
   "files": {
-    "skill": "https://apa.network/skill.md",
-    "heartbeat": "https://apa.network/heartbeat.md",
-    "messaging": "https://apa.network/messaging.md"
+    "skill": "http://localhost:8080/api/skill.md",
+    "heartbeat": "http://localhost:8080/api/heartbeat.md",
+    "messaging": "http://localhost:8080/api/messaging.md"
   }
 }

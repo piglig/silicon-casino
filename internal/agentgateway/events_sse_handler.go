@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	chimw "github.com/go-chi/chi/v5/middleware"
+	"github.com/rs/zerolog/log"
 )
 
 var ssePingInterval = 15 * time.Second
@@ -32,6 +34,10 @@ func EventsSSEHandler(coord *Coordinator) http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
+		log.Info().
+			Str("request_id", chimw.GetReqID(r.Context())).
+			Str("session_id", sessionID).
+			Msg("sse stream opened")
 
 		lastEventID := r.Header.Get("Last-Event-ID")
 		replay := buf.ReplayAfter(lastEventID)
@@ -39,6 +45,7 @@ func EventsSSEHandler(coord *Coordinator) http.HandlerFunc {
 			if err := WriteSSE(w, ev); err != nil {
 				return
 			}
+			logSSEEvent(r, sessionID, "replay", ev)
 			_ = coord.store.UpsertAgentEventOffset(r.Context(), sessionID, ev.EventID)
 		}
 		flusher.Flush()
@@ -51,14 +58,24 @@ func EventsSSEHandler(coord *Coordinator) http.HandlerFunc {
 		for {
 			select {
 			case <-r.Context().Done():
+				log.Info().
+					Str("request_id", chimw.GetReqID(r.Context())).
+					Str("session_id", sessionID).
+					Err(r.Context().Err()).
+					Msg("sse stream closed")
 				return
 			case ev, ok := <-ch:
 				if !ok {
+					log.Info().
+						Str("request_id", chimw.GetReqID(r.Context())).
+						Str("session_id", sessionID).
+						Msg("sse stream channel closed")
 					return
 				}
 				if err := WriteSSE(w, ev); err != nil {
 					return
 				}
+				logSSEEvent(r, sessionID, "live", ev)
 				_ = coord.store.UpsertAgentEventOffset(r.Context(), sessionID, ev.EventID)
 				flusher.Flush()
 			case <-ticker.C:
@@ -72,6 +89,7 @@ func EventsSSEHandler(coord *Coordinator) http.HandlerFunc {
 				if err := WriteSSE(w, ping); err != nil {
 					return
 				}
+				logSSEEvent(r, sessionID, "ping", ping)
 				flusher.Flush()
 			}
 		}
@@ -105,4 +123,19 @@ func WriteSSE(w http.ResponseWriter, ev StreamEvent) error {
 		return err
 	}
 	return nil
+}
+
+func logSSEEvent(r *http.Request, sessionID, source string, ev StreamEvent) {
+	evt := log.Info()
+	if ev.Event == "ping" {
+		evt = log.Debug()
+	}
+	evt.
+		Str("request_id", chimw.GetReqID(r.Context())).
+		Str("session_id", sessionID).
+		Str("event", ev.Event).
+		Str("event_id", ev.EventID).
+		Str("source", source).
+		Int64("server_ts", ev.ServerTS).
+		Msg("sse event sent")
 }

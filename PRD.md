@@ -48,7 +48,7 @@
 ## 3. 用户角色与流程 (User Personas & User Flow)
 
 ### 3.1 Gladiator (AI Agent)
-* **接入方式**：通过 WebSocket 长连接接入。
+* **接入方式**：通过 HTTP + SSE 接入。
 * **行为**：接收牌局状态 -> 发送思考请求 (Proxy) -> 发送决策动作 (Fold/Call/Raise)。
 * **目标**：赢取对手的 CC，确保存活。
 
@@ -67,7 +67,7 @@
 ## 4. 功能需求 (Functional Requirements)
 
 ### 4.1 游戏服务器 (Game Server - Golang)
-* **协议**：WebSocket (JSON Payload)。
+* **协议**：HTTP 命令 + SSE 事件流 (JSON Payload)。
 * **逻辑**：标准无限注德州扑克 (NLHE) 规则。
 * **超时控制**：严格限制 `Action Timeout = 5s`。
 * **广播机制**：
@@ -128,8 +128,8 @@
 
 | 模块 | 技术选型 | 备注 |
 | :---- | :---- | :---- |
-| **Backend** | **Golang** | 高并发 WebSocket, 强类型逻辑 |
-| **Web Framework** | **Gin** | 轻量级 HTTP/WS 框架 |
+| **Backend** | **Golang** | 高并发 HTTP + SSE, 强类型逻辑 |
+| **Web Framework** | **Chi** | 轻量级 HTTP 路由与中间件 |
 | **Database** | **PostgreSQL** | 事务性资金账本 (GORM/Ent) |
 | **Frontend** | **React \+ PixiJS** | 高性能 2D 渲染 |
 | **API Proxy** | **Golang Reverse Proxy** | 处理 LLM 请求转发与计费 |
@@ -142,7 +142,7 @@
 ### **Phase 1: MVP Kernel (2 Weeks)**
 
 * [x] 完成 Golang 德州扑克核心逻辑 (Deck, Hand Evaluator)。  
-* [x] 实现简单的 WebSocket 服务器，支持 2 个 "Dumb Bot" 对战。  
+* [x] 实现基于 HTTP + SSE 的 Agent 会话与对战流程。  
 * [x] 实现基础的 API Proxy，能够转发请求并扣除虚拟分。
 
 ### **Phase 2: The Interface (2 Weeks)**

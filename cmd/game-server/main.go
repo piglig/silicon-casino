@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"silicon-casino/internal/agentgateway"
@@ -56,14 +56,17 @@ func main() {
 	}
 	agentCoord := agentgateway.NewCoordinator(st, led)
 	r := newRouter(st, cfg, agentCoord)
+	logRoutes(r)
 
-	server := &http.Server{Addr: cfg.WSAddr, Handler: r, ReadHeaderTimeout: 5 * time.Second}
-	log.Info().Str("addr", cfg.WSAddr).Msg("ws listening")
+	server := &http.Server{Addr: cfg.HTTPAddr, Handler: r, ReadHeaderTimeout: 5 * time.Second}
+	log.Info().Str("addr", cfg.HTTPAddr).Msg("http listening")
 	log.Fatal().Err(server.ListenAndServe()).Msg("server stopped")
 }
 
-func newRouter(st *store.Store, cfg config.ServerConfig, agentCoord *agentgateway.Coordinator) http.Handler {
+func newRouter(st *store.Store, cfg config.ServerConfig, agentCoord *agentgateway.Coordinator) *chi.Mux {
 	r := chi.NewRouter()
+	r.Use(chimw.RequestID)
+	r.Use(requestLogMiddleware)
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.RealIP)
 
@@ -83,8 +86,6 @@ func newRouter(st *store.Store, cfg config.ServerConfig, agentCoord *agentgatewa
 		r.Delete("/agent/sessions/{session_id}", agentgateway.SessionsDeleteHandler(agentCoord))
 		r.Post("/agent/sessions/{session_id}/actions", agentgateway.ActionsHandler(agentCoord))
 		r.Get("/agent/sessions/{session_id}/state", agentgateway.StateHandler(agentCoord))
-		r.Get("/agent/sessions/{session_id}/seats", agentgateway.SeatsHandler(agentCoord))
-		r.Get("/agent/sessions/{session_id}/seats/{seat_id}", agentgateway.SeatByIDHandler(agentCoord))
 		r.Get("/agent/sessions/{session_id}/events", agentgateway.EventsSSEHandler(agentCoord))
 
 		r.Group(func(r chi.Router) {
@@ -97,29 +98,120 @@ func newRouter(st *store.Store, cfg config.ServerConfig, agentCoord *agentgatewa
 		r.Group(func(r chi.Router) {
 			r.Use(adminAuthMiddleware(cfg.AdminAPIKey))
 			r.Get("/agents", agentsHandler(st))
-			r.Get("/accounts", accountsHandler(st))
 			r.Get("/ledger", ledgerHandler(st))
 			r.Post("/topup", topupHandler(st))
-			r.Get("/leaderboard", leaderboardHandler(st))
-			r.MethodFunc(http.MethodGet, "/rooms", roomsHandler(st))
-			r.MethodFunc(http.MethodPost, "/rooms", roomsHandler(st))
+			r.Post("/rooms", roomsHandler(st))
 			r.MethodFunc(http.MethodGet, "/providers/rates", providerRatesHandler(st))
 			r.MethodFunc(http.MethodPost, "/providers/rates", providerRatesHandler(st))
 		})
 	})
 
-	skillServer := http.FileServer(http.Dir(filepath.Join("api", "skill")))
-	r.Handle("/skill.md", skillServer)
-	r.Handle("/heartbeat.md", skillServer)
-	r.Handle("/messaging.md", skillServer)
-	r.Handle("/skill.json", skillServer)
+	skillServer := http.StripPrefix("/api", http.FileServer(http.Dir(filepath.Join("api", "skill"))))
+	r.Handle("/api/skill.md", skillServer)
+	r.Handle("/api/heartbeat.md", skillServer)
+	r.Handle("/api/messaging.md", skillServer)
+	r.Handle("/api/skill.json", skillServer)
 
-	localSkillServer := http.StripPrefix("/skill-local/", http.FileServer(http.Dir(filepath.Join("api", "skill-local"))))
-	r.Handle("/skill-local/*", localSkillServer)
-
-	staticDir := filepath.Join("internal", "ws", "static")
+	staticDir := filepath.Join("internal", "web", "static")
 	r.Handle("/*", http.FileServer(http.Dir(staticDir)))
 	return r
+}
+
+func requestLogMiddleware(next http.Handler) http.Handler {
+	return chimw.RequestLogger(&apiLogFormatter{})(next)
+}
+
+type apiLogFormatter struct{}
+
+func (f *apiLogFormatter) NewLogEntry(r *http.Request) chimw.LogEntry {
+	return &apiLogEntry{
+		r: r,
+	}
+}
+
+type apiLogEntry struct {
+	r *http.Request
+}
+
+func (e *apiLogEntry) Write(status, bytes int, _ http.Header, elapsed time.Duration, _ interface{}) {
+	routePattern := ""
+	if rc := chi.RouteContext(e.r.Context()); rc != nil {
+		routePattern = rc.RoutePattern()
+	}
+	if routePattern == "" {
+		routePattern = e.r.URL.Path
+	}
+	if routePattern == "/healthz" && status < 500 {
+		return
+	}
+
+	evt := log.Info()
+	if status >= 500 {
+		evt = log.Error()
+	} else if status >= 400 {
+		evt = log.Warn()
+	} else if elapsed >= 500*time.Millisecond {
+		evt = log.Warn()
+	}
+
+	evt.
+		Str("request_id", chimw.GetReqID(e.r.Context())).
+		Str("remote_ip", e.r.RemoteAddr).
+		Str("user_agent", e.r.UserAgent()).
+		Str("method", e.r.Method).
+		Str("path", e.r.URL.Path).
+		Str("route", routePattern).
+		Str("query", e.r.URL.RawQuery).
+		Int("status", status).
+		Int("bytes", bytes).
+		Int64("duration_ms", elapsed.Milliseconds()).
+		Msg("http request")
+}
+
+func (e *apiLogEntry) Panic(v interface{}, stack []byte) {
+	routePattern := ""
+	if rc := chi.RouteContext(e.r.Context()); rc != nil {
+		routePattern = rc.RoutePattern()
+	}
+	if routePattern == "" {
+		routePattern = e.r.URL.Path
+	}
+	log.Error().
+		Str("request_id", chimw.GetReqID(e.r.Context())).
+		Str("method", e.r.Method).
+		Str("path", e.r.URL.Path).
+		Str("route", routePattern).
+		Any("panic", v).
+		Bytes("stack", stack).
+		Msg("http panic")
+}
+
+func logRoutes(r chi.Router) {
+	type routeDef struct {
+		Method string
+		Path   string
+	}
+	routes := make([]routeDef, 0, 64)
+	err := chi.Walk(r, func(method string, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		routes = append(routes, routeDef{Method: method, Path: route})
+		return nil
+	})
+	if err != nil {
+		log.Error().Err(err).Msg("walk routes failed")
+		return
+	}
+	sort.Slice(routes, func(i, j int) bool {
+		if routes[i].Path == routes[j].Path {
+			return routes[i].Method < routes[j].Method
+		}
+		return routes[i].Path < routes[j].Path
+	})
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("Registered routes (%d):\n", len(routes)))
+	for _, rt := range routes {
+		b.WriteString(fmt.Sprintf("  %-6s %s\n", rt.Method, rt.Path))
+	}
+	fmt.Print(b.String())
 }
 
 func seedAgent(st *store.Store, name, key string, initial int64) {
@@ -129,7 +221,6 @@ func seedAgent(st *store.Store, name, key string, initial int64) {
 	ctx := context.Background()
 	agent, err := st.GetAgentByAPIKey(ctx, key)
 	if err == nil && agent != nil {
-		_ = st.EnsureAccount(ctx, agent.ID, initial)
 		return
 	}
 	id, err := st.CreateAgent(ctx, name, key)
@@ -173,23 +264,6 @@ func agentsHandler(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		limit, offset := parsePagination(r)
 		items, err := st.ListAgents(r.Context(), limit, offset)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"items":  items,
-			"limit":  limit,
-			"offset": offset,
-		})
-	}
-}
-
-func accountsHandler(st *store.Store) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		agentID := r.URL.Query().Get("agent_id")
-		limit, offset := parsePagination(r)
-		items, err := st.ListAccounts(r.Context(), agentID, limit, offset)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -480,10 +554,16 @@ func agentStatusHandler(st *store.Store) http.HandlerFunc {
 func agentMeHandler(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agent := r.Context().Value(agentContextKey{}).(*store.Agent)
+		balance, err := st.GetAccountBalance(r.Context(), agent.ID)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"agent_id":   agent.ID,
 			"name":       agent.Name,
 			"status":     agent.Status,
+			"balance_cc": balance,
 			"created_at": agent.CreatedAt,
 		})
 	}
@@ -670,48 +750,6 @@ func verifyVendorKey(ctx context.Context, cfg config.ServerConfig, provider, api
 		return fmt.Errorf("invalid_vendor_key")
 	}
 	return nil
-}
-
-type leaderboardCache struct {
-	mu      sync.Mutex
-	expires time.Time
-	data    []store.LeaderboardEntry
-}
-
-func leaderboardHandler(st *store.Store) http.HandlerFunc {
-	cache := &leaderboardCache{}
-	return func(w http.ResponseWriter, r *http.Request) {
-		limit, offset := parsePagination(r)
-		cache.mu.Lock()
-		if time.Now().Before(cache.expires) && offset == 0 {
-			data := cache.data
-			cache.mu.Unlock()
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"items":  data,
-				"limit":  limit,
-				"offset": offset,
-			})
-			return
-		}
-		cache.mu.Unlock()
-
-		items, err := st.ListLeaderboard(r.Context(), limit, offset)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		if offset == 0 {
-			cache.mu.Lock()
-			cache.data = items
-			cache.expires = time.Now().Add(60 * time.Second)
-			cache.mu.Unlock()
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"items":  items,
-			"limit":  limit,
-			"offset": offset,
-		})
-	}
 }
 
 func adminAuthMiddleware(adminKey string) func(http.Handler) http.Handler {

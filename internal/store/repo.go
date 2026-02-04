@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"time"
 
 	"silicon-casino/internal/store/sqlcgen"
@@ -58,7 +57,7 @@ func (s *Store) GetAgentByAPIKey(ctx context.Context, apiKey string) (*Agent, er
 }
 
 func (s *Store) GetAccountBalance(ctx context.Context, agentID string) (int64, error) {
-	bal, err := s.q.GetAccountBalance(ctx, agentID)
+	bal, err := s.q.GetAccountBalanceByAgentID(ctx, agentID)
 	if err != nil {
 		return 0, mapNotFound(err)
 	}
@@ -149,7 +148,7 @@ func (s *Store) Debit(ctx context.Context, agentID string, amount int64, entryTy
 	defer tx.Rollback(ctx)
 
 	qtx := s.q.WithTx(tx)
-	bal, err := qtx.GetAccountBalanceForUpdate(ctx, agentID)
+	bal, err := qtx.GetAccountBalanceByAgentIDForUpdate(ctx, agentID)
 	if err != nil {
 		return 0, mapNotFound(err)
 	}
@@ -190,7 +189,7 @@ func (s *Store) Credit(ctx context.Context, agentID string, amount int64, entryT
 	defer tx.Rollback(ctx)
 
 	qtx := s.q.WithTx(tx)
-	bal, err := qtx.GetAccountBalanceForUpdate(ctx, agentID)
+	bal, err := qtx.GetAccountBalanceByAgentIDForUpdate(ctx, agentID)
 	if err != nil {
 		return 0, mapNotFound(err)
 	}
@@ -262,7 +261,7 @@ func (s *Store) ListRooms(ctx context.Context) ([]Room, error) {
 }
 
 func (s *Store) GetRoom(ctx context.Context, id string) (*Room, error) {
-	r, err := s.q.GetRoom(ctx, id)
+	r, err := s.q.GetRoomByID(ctx, id)
 	if err != nil {
 		return nil, mapNotFound(err)
 	}
@@ -354,7 +353,7 @@ func (s *Store) CreateAgentClaim(ctx context.Context, agentID, claimCode string)
 }
 
 func (s *Store) GetAgentClaimByAgent(ctx context.Context, agentID string) (*AgentClaim, error) {
-	r, err := s.q.GetAgentClaimByAgent(ctx, agentID)
+	r, err := s.q.GetAgentClaimByAgentID(ctx, agentID)
 	if err != nil {
 		return nil, mapNotFound(err)
 	}
@@ -395,7 +394,7 @@ func (s *Store) CreateAgentKey(ctx context.Context, agentID, provider, apiKeyHas
 }
 
 func (s *Store) GetAgentKeyByHash(ctx context.Context, apiKeyHash string) (*AgentKey, error) {
-	r, err := s.q.GetAgentKeyByHash(ctx, apiKeyHash)
+	r, err := s.q.GetAgentKeyByAPIKeyHash(ctx, apiKeyHash)
 	if err != nil {
 		return nil, mapNotFound(err)
 	}
@@ -428,7 +427,7 @@ func (s *Store) ListProviderRates(ctx context.Context) ([]ProviderRate, error) {
 }
 
 func (s *Store) IsAgentBlacklisted(ctx context.Context, agentID string) (bool, string, error) {
-	reason, err := s.q.IsAgentBlacklisted(ctx, agentID)
+	reason, err := s.q.GetAgentBlacklistReasonByAgentID(ctx, agentID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return false, "", nil
@@ -452,7 +451,7 @@ func (s *Store) RecordAgentKeyAttempt(ctx context.Context, agentID, provider, st
 }
 
 func (s *Store) LastSuccessfulKeyBindAt(ctx context.Context, agentID string) (*time.Time, error) {
-	ts, err := s.q.LastSuccessfulKeyBindAt(ctx, agentID)
+	ts, err := s.q.GetLastSuccessfulKeyBindAtByAgentID(ctx, agentID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -467,7 +466,7 @@ func (s *Store) LastSuccessfulKeyBindAt(ctx context.Context, agentID string) (*t
 }
 
 func (s *Store) CountConsecutiveInvalidKeyAttempts(ctx context.Context, agentID string) (int, error) {
-	statuses, err := s.q.ListAgentKeyAttemptStatuses(ctx, agentID)
+	statuses, err := s.q.ListAgentKeyAttemptStatusesByAgentID(ctx, agentID)
 	if err != nil {
 		return 0, err
 	}
@@ -484,7 +483,7 @@ func (s *Store) CountConsecutiveInvalidKeyAttempts(ctx context.Context, agentID 
 }
 
 func (s *Store) GetProviderRate(ctx context.Context, provider string) (*ProviderRate, error) {
-	r, err := s.q.GetProviderRate(ctx, provider)
+	r, err := s.q.GetProviderRateByProvider(ctx, provider)
 	if err != nil {
 		return nil, mapNotFound(err)
 	}
@@ -613,11 +612,49 @@ func int4Param(v int32) pgtype.Int4 {
 	return pgtype.Int4{Int32: v, Valid: true}
 }
 
+func int4PtrParam(v *int) pgtype.Int4 {
+	if v == nil {
+		return pgtype.Int4{}
+	}
+	return pgtype.Int4{Int32: int32(*v), Valid: true}
+}
+
+func int8PtrParam(v *int64) pgtype.Int8 {
+	if v == nil {
+		return pgtype.Int8{}
+	}
+	return pgtype.Int8{Int64: *v, Valid: true}
+}
+
 func timeParam(v *time.Time) pgtype.Timestamptz {
 	if v == nil {
 		return pgtype.Timestamptz{}
 	}
 	return pgtype.Timestamptz{Time: *v, Valid: true}
+}
+
+func intPtrVal(v pgtype.Int4) *int {
+	if !v.Valid {
+		return nil
+	}
+	out := int(v.Int32)
+	return &out
+}
+
+func int64PtrVal(v pgtype.Int8) *int64 {
+	if !v.Valid {
+		return nil
+	}
+	out := v.Int64
+	return &out
+}
+
+func timePtrVal(v pgtype.Timestamptz) *time.Time {
+	if !v.Valid {
+		return nil
+	}
+	out := v.Time
+	return &out
 }
 
 func textVal(v pgtype.Text) string {
@@ -641,61 +678,58 @@ func anyToInt64(v any) int64 {
 }
 
 func (s *Store) CreateAgentSession(ctx context.Context, sess AgentSession) error {
-	_, err := s.Pool.Exec(ctx, `
-		INSERT INTO agent_sessions (id, agent_id, room_id, table_id, seat_id, join_mode, status, expires_at)
-		VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, $8)
-	`, sess.ID, sess.AgentID, sess.RoomID, sess.TableID, sess.SeatID, sess.JoinMode, sess.Status, sess.ExpiresAt)
-	return err
+	return s.q.CreateAgentSession(ctx, sqlcgen.CreateAgentSessionParams{
+		ID:        sess.ID,
+		AgentID:   sess.AgentID,
+		RoomID:    sess.RoomID,
+		Column4:   sess.TableID,
+		SeatID:    int4PtrParam(sess.SeatID),
+		JoinMode:  sess.JoinMode,
+		Status:    sess.Status,
+		ExpiresAt: timeParam(&sess.ExpiresAt),
+	})
 }
 
 func (s *Store) GetAgentSession(ctx context.Context, sessionID string) (*AgentSession, error) {
-	var out AgentSession
-	var seatID *int
-	var tableID *string
-	var closedAt *time.Time
-	err := s.Pool.QueryRow(ctx, `
-		SELECT id, agent_id, room_id, table_id, seat_id, join_mode, status, expires_at, created_at, closed_at
-		FROM agent_sessions
-		WHERE id = $1
-	`, sessionID).Scan(
-		&out.ID, &out.AgentID, &out.RoomID, &tableID, &seatID, &out.JoinMode, &out.Status, &out.ExpiresAt, &out.CreatedAt, &closedAt,
-	)
+	r, err := s.q.GetAgentSessionByID(ctx, sessionID)
 	if err != nil {
 		return nil, mapNotFound(err)
 	}
-	if tableID != nil {
-		out.TableID = *tableID
-	}
-	out.SeatID = seatID
-	out.ClosedAt = closedAt
-	return &out, nil
+	return &AgentSession{
+		ID:        r.ID,
+		AgentID:   r.AgentID,
+		RoomID:    r.RoomID,
+		TableID:   textVal(r.TableID),
+		SeatID:    intPtrVal(r.SeatID),
+		JoinMode:  r.JoinMode,
+		Status:    r.Status,
+		ExpiresAt: r.ExpiresAt.Time,
+		CreatedAt: r.CreatedAt.Time,
+		ClosedAt:  timePtrVal(r.ClosedAt),
+	}, nil
 }
 
 func (s *Store) UpdateAgentSessionMatch(ctx context.Context, sessionID, tableID string, seatID int) error {
-	cmd, err := s.Pool.Exec(ctx, `
-		UPDATE agent_sessions
-		SET table_id = $2, seat_id = $3, status = 'active'
-		WHERE id = $1
-	`, sessionID, tableID, seatID)
+	rows, err := s.q.UpdateAgentSessionMatch(ctx, sqlcgen.UpdateAgentSessionMatchParams{
+		ID:      sessionID,
+		TableID: textParam(tableID),
+		SeatID:  int4Param(int32(seatID)),
+	})
 	if err != nil {
 		return err
 	}
-	if cmd.RowsAffected() == 0 {
+	if rows == 0 {
 		return ErrNotFound
 	}
 	return nil
 }
 
 func (s *Store) CloseAgentSession(ctx context.Context, sessionID string) error {
-	cmd, err := s.Pool.Exec(ctx, `
-		UPDATE agent_sessions
-		SET status = 'closed', closed_at = now()
-		WHERE id = $1 AND status <> 'closed'
-	`, sessionID)
+	rows, err := s.q.CloseAgentSession(ctx, sessionID)
 	if err != nil {
 		return err
 	}
-	if cmd.RowsAffected() == 0 {
+	if rows == 0 {
 		return ErrNotFound
 	}
 	return nil
@@ -705,69 +739,73 @@ func (s *Store) InsertAgentActionRequest(ctx context.Context, req AgentActionReq
 	if req.ID == "" {
 		req.ID = NewID()
 	}
-	cmd, err := s.Pool.Exec(ctx, `
-		INSERT INTO agent_action_requests (id, session_id, request_id, turn_id, action_type, amount_cc, thought_log, accepted, reason)
-		VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8, NULLIF($9, ''))
-		ON CONFLICT (session_id, request_id) DO NOTHING
-	`, req.ID, req.SessionID, req.RequestID, req.TurnID, req.Action, req.AmountCC, req.ThoughtLog, req.Accepted, req.Reason)
+	rows, err := s.q.InsertAgentActionRequestIfAbsent(ctx, sqlcgen.InsertAgentActionRequestIfAbsentParams{
+		ID:         req.ID,
+		SessionID:  req.SessionID,
+		RequestID:  req.RequestID,
+		TurnID:     req.TurnID,
+		ActionType: req.Action,
+		AmountCc:   int8PtrParam(req.AmountCC),
+		Column7:    req.ThoughtLog,
+		Accepted:   req.Accepted,
+		Column9:    req.Reason,
+	})
 	if err != nil {
 		return false, err
 	}
-	return cmd.RowsAffected() > 0, nil
+	return rows > 0, nil
 }
 
 func (s *Store) GetAgentActionRequest(ctx context.Context, sessionID, requestID string) (*AgentActionRequest, error) {
-	var out AgentActionRequest
-	var amount *int64
-	var thought *string
-	var reason *string
-	err := s.Pool.QueryRow(ctx, `
-		SELECT id, session_id, request_id, turn_id, action_type, amount_cc, thought_log, accepted, reason, created_at
-		FROM agent_action_requests
-		WHERE session_id = $1 AND request_id = $2
-	`, sessionID, requestID).Scan(
-		&out.ID, &out.SessionID, &out.RequestID, &out.TurnID, &out.Action, &amount, &thought, &out.Accepted, &reason, &out.CreatedAt,
-	)
+	r, err := s.q.GetAgentActionRequestBySessionAndRequest(ctx, sqlcgen.GetAgentActionRequestBySessionAndRequestParams{
+		SessionID: sessionID,
+		RequestID: requestID,
+	})
 	if err != nil {
 		return nil, mapNotFound(err)
 	}
-	out.AmountCC = amount
-	if thought != nil {
-		out.ThoughtLog = *thought
-	}
-	if reason != nil {
-		out.Reason = *reason
-	}
-	return &out, nil
+	return &AgentActionRequest{
+		ID:         r.ID,
+		SessionID:  r.SessionID,
+		RequestID:  r.RequestID,
+		TurnID:     r.TurnID,
+		Action:     r.ActionType,
+		AmountCC:   int64PtrVal(r.AmountCc),
+		ThoughtLog: textVal(r.ThoughtLog),
+		Accepted:   r.Accepted,
+		Reason:     textVal(r.Reason),
+		CreatedAt:  r.CreatedAt.Time,
+	}, nil
+}
+
+func (s *Store) CountAgentActionRequestsBySessionAndRequest(ctx context.Context, sessionID, requestID string) (int, error) {
+	count, err := s.q.CountAgentActionRequestsBySessionAndRequest(ctx, sqlcgen.CountAgentActionRequestsBySessionAndRequestParams{
+		SessionID: sessionID,
+		RequestID: requestID,
+	})
+	return int(count), err
 }
 
 func (s *Store) UpsertAgentEventOffset(ctx context.Context, sessionID, lastEventID string) error {
-	_, err := s.Pool.Exec(ctx, `
-		INSERT INTO agent_event_offsets (session_id, last_event_id)
-		VALUES ($1, $2)
-		ON CONFLICT (session_id)
-		DO UPDATE SET last_event_id = EXCLUDED.last_event_id, updated_at = now()
-	`, sessionID, lastEventID)
-	return err
+	return s.q.UpsertAgentEventOffset(ctx, sqlcgen.UpsertAgentEventOffsetParams{
+		SessionID:   sessionID,
+		LastEventID: lastEventID,
+	})
 }
 
 func (s *Store) GetAgentEventOffset(ctx context.Context, sessionID string) (*AgentEventOffset, error) {
-	var out AgentEventOffset
-	err := s.Pool.QueryRow(ctx, `
-		SELECT session_id, last_event_id, updated_at
-		FROM agent_event_offsets
-		WHERE session_id = $1
-	`, sessionID).Scan(&out.SessionID, &out.LastEventID, &out.UpdatedAt)
+	r, err := s.q.GetAgentEventOffsetBySessionID(ctx, sessionID)
 	if err != nil {
 		return nil, mapNotFound(err)
 	}
-	return &out, nil
+	return &AgentEventOffset{
+		SessionID:   r.SessionID,
+		LastEventID: r.LastEventID,
+		UpdatedAt:   r.UpdatedAt.Time,
+	}, nil
 }
 
 func (s *Store) DebugSessionCount(ctx context.Context) (int, error) {
-	var count int
-	if err := s.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM agent_sessions`).Scan(&count); err != nil {
-		return 0, fmt.Errorf("count sessions: %w", err)
-	}
-	return count, nil
+	count, err := s.q.CountAgentSessions(ctx)
+	return int(count), err
 }

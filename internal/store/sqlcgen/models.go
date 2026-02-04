@@ -31,6 +31,19 @@ type Agent struct {
 	CreatedAt  pgtype.Timestamptz
 }
 
+type AgentActionRequest struct {
+	ID         string
+	SessionID  string
+	RequestID  string
+	TurnID     string
+	ActionType string
+	AmountCc   pgtype.Int8
+	ThoughtLog pgtype.Text
+	Accepted   bool
+	Reason     pgtype.Text
+	CreatedAt  pgtype.Timestamptz
+}
+
 type AgentBlacklist struct {
 	AgentID   string
 	Reason    string
@@ -43,6 +56,12 @@ type AgentClaim struct {
 	ClaimCode string
 	Status    string
 	CreatedAt pgtype.Timestamptz
+}
+
+type AgentEventOffset struct {
+	SessionID   string
+	LastEventID string
+	UpdatedAt   pgtype.Timestamptz
 }
 
 type AgentKey struct {
@@ -60,6 +79,19 @@ type AgentKeyAttempt struct {
 	Provider  string
 	Status    string
 	CreatedAt pgtype.Timestamptz
+}
+
+type AgentSession struct {
+	ID        string
+	AgentID   string
+	RoomID    string
+	TableID   pgtype.Text
+	SeatID    pgtype.Int4
+	JoinMode  string
+	Status    string
+	ExpiresAt pgtype.Timestamptz
+	CreatedAt pgtype.Timestamptz
+	ClosedAt  pgtype.Timestamptz
 }
 
 type Hand struct {

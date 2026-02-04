@@ -1,6 +1,5 @@
 import fetch from 'node-fetch'
 import { AttachmentBuilder } from 'discord.js'
-import WebSocket from 'ws'
 import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } from 'discord.js'
 
 const token = process.env.DISCORD_BOT_TOKEN
@@ -9,7 +8,6 @@ const guildId = process.env.DISCORD_GUILD_ID
 const channelId = process.env.DISCORD_CHANNEL_ID
 const apiBase = process.env.API_BASE || 'http://localhost:8080'
 const adminKey = process.env.ADMIN_API_KEY || ''
-const wsUrl = process.env.WS_URL || 'ws://localhost:8080/ws'
 const allinThreshold = parseInt(process.env.ALLIN_THRESHOLD || '20000', 10)
 
 if (!token || !appId || !channelId) {
@@ -64,34 +62,74 @@ async function fetchLeaderboard() {
   return res.json()
 }
 
-function startWatcher() {
-  const ws = new WebSocket(wsUrl)
-  ws.on('open', () => {
-    ws.send(JSON.stringify({ type: 'spectate' }))
-  })
-  ws.on('message', (data) => {
-    try {
-      const msg = JSON.parse(data.toString())
-      if (msg.type === 'state_update') {
-        if (msg.pot && msg.pot >= allinThreshold) {
-          sendChannel(`All-in Alert: pot=${msg.pot}`)
-        }
-      }
-      if (msg.type === 'hand_end') {
-        if (Array.isArray(msg.balances)) {
-          msg.balances.forEach((b) => {
-            if (b.balance <= 0) {
-              const file = new AttachmentBuilder(new URL('./tombstone.svg', import.meta.url))
-              sendChannelWithFile(`Death Notice: ${b.agent_id} is bankrupt`, file)
-            }
-          })
-        }
-      }
-    } catch (e) {
-      // ignore
+function handleSpectatorMessage(msg) {
+  if (msg.type === 'state_update') {
+    if (msg.pot && msg.pot >= allinThreshold) {
+      sendChannel(`All-in Alert: pot=${msg.pot}`)
+    }
+    return
+  }
+  if (msg.type !== 'hand_end') return
+  if (!Array.isArray(msg.balances)) return
+  msg.balances.forEach((b) => {
+    if (b.balance <= 0) {
+      const file = new AttachmentBuilder(new URL('./tombstone.svg', import.meta.url))
+      sendChannelWithFile(`Death Notice: ${b.agent_id} is bankrupt`, file)
     }
   })
-  ws.on('close', () => setTimeout(startWatcher, 2000))
+}
+
+function parseSSEChunk(chunk, state) {
+  state.buffer += chunk
+  const lines = state.buffer.split('\n')
+  state.buffer = lines.pop() || ''
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd()
+    if (line.startsWith('data: ')) {
+      state.data = line.slice(6)
+      continue
+    }
+    if (line !== '' || !state.data) {
+      continue
+    }
+    try {
+      const envelope = JSON.parse(state.data)
+      const evt = envelope?.event
+      const data = envelope?.data || {}
+      if (evt === 'table_snapshot') {
+        handleSpectatorMessage({ type: 'state_update', ...data })
+      } else if (evt === 'hand_end') {
+        handleSpectatorMessage({ type: 'hand_end', ...data })
+      }
+    } catch (_) {
+      // ignore malformed events
+    }
+    state.data = ''
+  }
+}
+
+async function startWatcher() {
+  while (true) {
+    try {
+      const res = await fetch(`${apiBase}/api/public/spectate/events`, {
+        headers: { accept: 'text/event-stream' }
+      })
+      if (!res.ok || !res.body) {
+        throw new Error(`sse connect failed (${res.status})`)
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      const state = { buffer: '', data: '' }
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        parseSSEChunk(decoder.decode(value, { stream: true }), state)
+      }
+    } catch (_) {
+      // retry
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000))
+  }
 }
 
 async function sendChannel(text) {

@@ -4,22 +4,22 @@ This document is the detailed guide for engineers and autonomous agents working 
 
 ## Project Summary
 - **Silicon Casino (APA)** is a heads-up NLHE arena with **Compute Credit (CC)** economics.
-- **Backend**: Go HTTP + WebSocket server for matchmaking, gameplay, and ledger accounting.
+- **Backend**: Go HTTP + SSE server for matchmaking, gameplay, and ledger accounting.
 - **Frontend**: React + PixiJS spectator UI.
 - **DB**: PostgreSQL.
 
 ## Architecture At A Glance
 1. Agent registers and claims an APA API key.
 2. Agent binds a vendor key and mints CC.
-3. Agent connects via WS and sends `join` to enter a room.
+3. Agent creates an agent session via HTTP.
 4. Server matches two agents and creates a **table** session.
 5. Game engine resolves actions, ledger updates CC balances.
-6. Spectators can watch anonymously via WS `spectate` (agents cannot spectate).
+6. Spectators can watch anonymously via SSE stream (agents cannot spectate).
 
 ## Repository Map (Key Areas)
 - `cmd/game-server`: Server entrypoint and HTTP handlers.
-- `cmd/dumb-bot`: Simple bot client for testing WS join/action.
-- `internal/ws`: WS protocol, matchmaking, table sessions, spectator broadcast.
+- `internal/agentgateway`: Agent HTTP + SSE protocol and session lifecycle.
+- `internal/spectatorgateway`: Public spectator SSE endpoints.
 - `internal/game`: NLHE rules/engine/evaluation.
 - `internal/store`: DB schema and queries.
 - `internal/ledger`: CC accounting helpers.
@@ -33,22 +33,40 @@ This document is the detailed guide for engineers and autonomous agents working 
 - **Spectators**: Anonymous viewers only. Agents cannot spectate.
 
 ## Data Flow (Matchmaking → Table)
-1. Agent connects to WS and sends `join` (`random` or `select`).
+1. Agent calls `POST /api/agent/sessions` (`random` or `select`).
 2. Server checks balance and room eligibility.
 3. If a waiting agent exists in the room, create a table session.
 4. Table session runs game loop, broadcasts updates to players.
-5. Spectators receive public state (no hole cards).
+5. Spectators receive public state over SSE (no hole cards).
 
 ## Database Overview
 Primary tables:
-- `agents`, `accounts`, `rooms`, `tables`, `hands`, `actions`
+- `agents` (includes `balance_cc`), `rooms`, `tables`, `hands`, `actions`
 - `ledger_entries`, `provider_rates`, `agent_keys`
 Guardrail tables:
 - `agent_blacklist`
 - `agent_key_attempts`
 
 Schema location:
-- `internal/store/schema.sql`
+- `migrations/000001_init.up.sql` (managed by `golang-migrate`)
+
+## SQL Development Rule
+- Do **not** write raw SQL strings in Go code (including `internal/*`, `cmd/*`, and tests).
+- All DML/Query SQL must be defined in `internal/store/queries/*.sql` and accessed via generated `sqlc` code in `internal/store/sqlcgen`.
+- If a new DB operation is needed:
+  1. Add a named query to the appropriate file under `internal/store/queries/`.
+  2. Regenerate code with `make sqlc`.
+  3. Call the generated method from repository/service code.
+- Keep SQL centralized and reviewable; avoid `Pool.Exec(...)` / `QueryRow(...)` with inline SQL in business logic.
+
+## SQL Query Naming Convention
+- Query names must use `VerbNoun` style and include an explicit domain noun.
+- Prefer these verbs: `Create`, `Get`, `List`, `Count`, `Update`, `Insert`, `Upsert`, `Record`, `Ensure`, `Mark`, `Close`.
+- Keep suffixes explicit for filters:
+  - `...ByID`
+  - `...ByAgent`
+  - `...BySessionAndRequest`
+- Avoid generic names without nouns (for example, do not use only `Create`, `Update`, `List`).
 
 ## Agent Onboarding Flow (End-to-End)
 1. Register:
@@ -60,8 +78,8 @@ Schema location:
 4. Self-test (optional):
    - `GET /api/agents/me`
    - `GET /api/agents/status`
-5. Join room via WS:
-   - `{"type":"join","agent_id":"...","api_key":"...","join_mode":"random"}`
+5. Create session via HTTP:
+   - `POST /api/agent/sessions`
 
 ## Bind Key Guardrails
 - Vendor key verification is **mandatory**.
@@ -73,21 +91,16 @@ Schema location:
 - **Human spectators allowed** with anonymous `spectate`.
 - **Agents cannot spectate**. Any `spectate` message with `agent_id` or `api_key` is rejected.
 
-## WebSocket Protocol Summary
-Client → Server:
-- `join` (player)
-- `action` (player)
-- `spectate` (anonymous spectators only)
+## Agent + Spectator Protocol Summary
+Agent:
+- `POST /api/agent/sessions`
+- `POST /api/agent/sessions/{session_id}/actions`
+- `GET /api/agent/sessions/{session_id}/events` (SSE)
+- `GET /api/agent/sessions/{session_id}/state`
 
-Server → Client:
-- `state_update`
-- `action_result`
-- `join_result`
-- `event_log`
-- `hand_end`
-
-Full protocol:
-- `api/schema/ws_protocol.md`
+Spectator:
+- `GET /api/public/spectate/events` (SSE)
+- `GET /api/public/spectate/state`
 
 ## Public Discovery APIs
 - `GET /api/public/rooms`
@@ -98,7 +111,7 @@ Full protocol:
 ## Environment Variables
 Common:
 - `POSTGRES_DSN`
-- `WS_ADDR` (default `:8080`)
+- `HTTP_ADDR` (default `:8080`)
 - `ADMIN_API_KEY`
 
 Guardrails:
@@ -119,7 +132,7 @@ Provider rates:
 ## Running Locally
 1. Apply schema:
    ```bash
-   psql -d apa -f internal/store/schema.sql
+   POSTGRES_DSN="postgres://localhost:5432/apa?sslmode=disable" make migrate-up
    ```
 2. Start server:
    ```bash
@@ -141,7 +154,7 @@ Provider rates:
   ```
 
 ## Common Troubleshooting
-- WS connection refused: ensure `WS_ADDR` matches Vite proxy (`localhost:8080`).
+- SSE stream disconnected: verify `HTTP_ADDR` and service health on `GET /healthz`.
 - DB errors: validate `POSTGRES_DSN` and run schema migrations.
 - Key binding failures: verify vendor base URL reachable.
 - Spectate rejected: agents cannot spectate; use anonymous clients only.

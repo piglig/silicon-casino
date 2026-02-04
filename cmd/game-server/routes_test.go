@@ -11,7 +11,7 @@ import (
 	"silicon-casino/internal/testutil"
 )
 
-func TestRoutesNoWSAndNewAgentEndpoints(t *testing.T) {
+func TestRoutesAndAgentEndpoints(t *testing.T) {
 	st, cleanup := testutil.OpenTestStore(t)
 	defer cleanup()
 	if err := st.EnsureDefaultRooms(t.Context()); err != nil {
@@ -20,11 +20,11 @@ func TestRoutesNoWSAndNewAgentEndpoints(t *testing.T) {
 	coord := agentgateway.NewCoordinator(st, ledger.New(st))
 	router := newRouter(st, config.ServerConfig{AdminAPIKey: "admin-key"}, coord)
 
-	req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("expected /ws 404, got %d", w.Code)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected /healthz 200, got %d", w.Code)
 	}
 
 	req = httptest.NewRequest(http.MethodPost, "/api/agent/sessions", nil)

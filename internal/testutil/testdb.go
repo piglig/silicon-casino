@@ -3,8 +3,10 @@ package testutil
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -12,8 +14,11 @@ import (
 	"silicon-casino/internal/config"
 	"silicon-casino/internal/store"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+var testSchemaNamePattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
 func OpenTestStore(t *testing.T) (*store.Store, func()) {
 	t.Helper()
@@ -27,7 +32,12 @@ func OpenTestStore(t *testing.T) (*store.Store, func()) {
 	if err != nil {
 		t.Fatalf("open base db: %v", err)
 	}
-	if _, err := base.Exec(context.Background(), `CREATE SCHEMA `+schema); err != nil {
+	createSchemaSQL, err := schemaDDL("CREATE SCHEMA %s", schema)
+	if err != nil {
+		base.Close()
+		t.Fatalf("invalid schema name: %v", err)
+	}
+	if _, err := base.Exec(context.Background(), createSchemaSQL); err != nil {
 		base.Close()
 		t.Fatalf("create schema: %v", err)
 	}
@@ -47,7 +57,9 @@ func OpenTestStore(t *testing.T) (*store.Store, func()) {
 		st.Close()
 		base, err := pgxpool.New(context.Background(), dsn)
 		if err == nil {
-			_, _ = base.Exec(context.Background(), `DROP SCHEMA `+schema+` CASCADE`)
+			if dropSchemaSQL, ddlErr := schemaDDL("DROP SCHEMA %s CASCADE", schema); ddlErr == nil {
+				_, _ = base.Exec(context.Background(), dropSchemaSQL)
+			}
 			base.Close()
 		}
 	}
@@ -91,5 +103,12 @@ func withSearchPath(dsn, schema string) string {
 	if strings.Contains(dsn, "?") {
 		sep = "&"
 	}
-	return dsn + sep + "search_path=" + schema
+	return dsn + sep + "search_path=" + url.QueryEscape(schema)
+}
+
+func schemaDDL(format, schema string) (string, error) {
+	if !testSchemaNamePattern.MatchString(schema) {
+		return "", fmt.Errorf("schema %q does not match required pattern", schema)
+	}
+	return fmt.Sprintf(format, pgx.Identifier{schema}.Sanitize()), nil
 }

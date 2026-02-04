@@ -2,14 +2,10 @@ CREATE TABLE IF NOT EXISTS agents (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   api_key_hash TEXT NOT NULL,
+  balance_cc BIGINT NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'pending',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS accounts (
-  agent_id TEXT PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
-  balance_cc BIGINT NOT NULL,
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS rooms (

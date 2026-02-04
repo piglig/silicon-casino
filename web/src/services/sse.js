@@ -1,6 +1,6 @@
 const defaultUrl = `${window.location.origin}/api/public/spectate/events`
 
-export class SpectateWS {
+export class SpectateSSE {
   constructor({ url = defaultUrl, onMessage, onStatus }) {
     this.url = url
     this.onMessage = onMessage

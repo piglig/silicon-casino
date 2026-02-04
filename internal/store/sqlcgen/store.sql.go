@@ -28,6 +28,50 @@ func (q *Queries) BlacklistAgent(ctx context.Context, arg BlacklistAgentParams) 
 	return err
 }
 
+const closeAgentSession = `-- name: CloseAgentSession :execrows
+UPDATE agent_sessions
+SET status = 'closed', closed_at = now()
+WHERE id = $1 AND status <> 'closed'
+`
+
+func (q *Queries) CloseAgentSession(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.Exec(ctx, closeAgentSession, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const countAgentActionRequestsBySessionAndRequest = `-- name: CountAgentActionRequestsBySessionAndRequest :one
+SELECT COUNT(*)::int
+FROM agent_action_requests
+WHERE session_id = $1 AND request_id = $2
+`
+
+type CountAgentActionRequestsBySessionAndRequestParams struct {
+	SessionID string
+	RequestID string
+}
+
+func (q *Queries) CountAgentActionRequestsBySessionAndRequest(ctx context.Context, arg CountAgentActionRequestsBySessionAndRequestParams) (int32, error) {
+	row := q.db.QueryRow(ctx, countAgentActionRequestsBySessionAndRequest, arg.SessionID, arg.RequestID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countAgentSessions = `-- name: CountAgentSessions :one
+SELECT COUNT(*)::int
+FROM agent_sessions
+`
+
+func (q *Queries) CountAgentSessions(ctx context.Context) (int32, error) {
+	row := q.db.QueryRow(ctx, countAgentSessions)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countRooms = `-- name: CountRooms :one
 SELECT COUNT(1)::int
 FROM rooms
@@ -89,6 +133,36 @@ func (q *Queries) CreateAgentKey(ctx context.Context, arg CreateAgentKeyParams) 
 		arg.AgentID,
 		arg.Provider,
 		arg.ApiKeyHash,
+	)
+	return err
+}
+
+const createAgentSession = `-- name: CreateAgentSession :exec
+INSERT INTO agent_sessions (id, agent_id, room_id, table_id, seat_id, join_mode, status, expires_at)
+VALUES ($1, $2, $3, NULLIF($4::text, ''), $5, $6, $7, $8)
+`
+
+type CreateAgentSessionParams struct {
+	ID        string
+	AgentID   string
+	RoomID    string
+	Column4   string
+	SeatID    pgtype.Int4
+	JoinMode  string
+	Status    string
+	ExpiresAt pgtype.Timestamptz
+}
+
+func (q *Queries) CreateAgentSession(ctx context.Context, arg CreateAgentSessionParams) error {
+	_, err := q.db.Exec(ctx, createAgentSession,
+		arg.ID,
+		arg.AgentID,
+		arg.RoomID,
+		arg.Column4,
+		arg.SeatID,
+		arg.JoinMode,
+		arg.Status,
+		arg.ExpiresAt,
 	)
 	return err
 }
@@ -168,9 +242,9 @@ func (q *Queries) EndHand(ctx context.Context, id string) error {
 }
 
 const ensureAccount = `-- name: EnsureAccount :exec
-INSERT INTO accounts (agent_id, balance_cc)
-VALUES ($1, $2)
-ON CONFLICT (agent_id) DO NOTHING
+UPDATE agents
+SET balance_cc = $2, updated_at = now()
+WHERE id = $1 AND balance_cc = 0
 `
 
 type EnsureAccountParams struct {
@@ -206,31 +280,60 @@ func (q *Queries) EnsureDefaultProviderRate(ctx context.Context, arg EnsureDefau
 	return err
 }
 
-const getAccountBalance = `-- name: GetAccountBalance :one
+const getAccountBalanceByAgentID = `-- name: GetAccountBalanceByAgentID :one
 SELECT balance_cc
-FROM accounts
-WHERE agent_id = $1
+FROM agents
+WHERE id = $1
 `
 
-func (q *Queries) GetAccountBalance(ctx context.Context, agentID string) (int64, error) {
-	row := q.db.QueryRow(ctx, getAccountBalance, agentID)
+func (q *Queries) GetAccountBalanceByAgentID(ctx context.Context, agentID string) (int64, error) {
+	row := q.db.QueryRow(ctx, getAccountBalanceByAgentID, agentID)
 	var balance_cc int64
 	err := row.Scan(&balance_cc)
 	return balance_cc, err
 }
 
-const getAccountBalanceForUpdate = `-- name: GetAccountBalanceForUpdate :one
+const getAccountBalanceByAgentIDForUpdate = `-- name: GetAccountBalanceByAgentIDForUpdate :one
 SELECT balance_cc
-FROM accounts
-WHERE agent_id = $1
+FROM agents
+WHERE id = $1
 FOR UPDATE
 `
 
-func (q *Queries) GetAccountBalanceForUpdate(ctx context.Context, agentID string) (int64, error) {
-	row := q.db.QueryRow(ctx, getAccountBalanceForUpdate, agentID)
+func (q *Queries) GetAccountBalanceByAgentIDForUpdate(ctx context.Context, agentID string) (int64, error) {
+	row := q.db.QueryRow(ctx, getAccountBalanceByAgentIDForUpdate, agentID)
 	var balance_cc int64
 	err := row.Scan(&balance_cc)
 	return balance_cc, err
+}
+
+const getAgentActionRequestBySessionAndRequest = `-- name: GetAgentActionRequestBySessionAndRequest :one
+SELECT id, session_id, request_id, turn_id, action_type, amount_cc, thought_log, accepted, reason, created_at
+FROM agent_action_requests
+WHERE session_id = $1 AND request_id = $2
+`
+
+type GetAgentActionRequestBySessionAndRequestParams struct {
+	SessionID string
+	RequestID string
+}
+
+func (q *Queries) GetAgentActionRequestBySessionAndRequest(ctx context.Context, arg GetAgentActionRequestBySessionAndRequestParams) (AgentActionRequest, error) {
+	row := q.db.QueryRow(ctx, getAgentActionRequestBySessionAndRequest, arg.SessionID, arg.RequestID)
+	var i AgentActionRequest
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.RequestID,
+		&i.TurnID,
+		&i.ActionType,
+		&i.AmountCc,
+		&i.ThoughtLog,
+		&i.Accepted,
+		&i.Reason,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const getAgentByAPIKeyHash = `-- name: GetAgentByAPIKeyHash :one
@@ -271,14 +374,14 @@ func (q *Queries) GetAgentByID(ctx context.Context, id string) (Agent, error) {
 	return i, err
 }
 
-const getAgentClaimByAgent = `-- name: GetAgentClaimByAgent :one
+const getAgentClaimByAgentID = `-- name: GetAgentClaimByAgentID :one
 SELECT id, agent_id, claim_code, status, created_at
 FROM agent_claims
 WHERE agent_id = $1
 `
 
-func (q *Queries) GetAgentClaimByAgent(ctx context.Context, agentID string) (AgentClaim, error) {
-	row := q.db.QueryRow(ctx, getAgentClaimByAgent, agentID)
+func (q *Queries) GetAgentClaimByAgentID(ctx context.Context, agentID string) (AgentClaim, error) {
+	row := q.db.QueryRow(ctx, getAgentClaimByAgentID, agentID)
 	var i AgentClaim
 	err := row.Scan(
 		&i.ID,
@@ -290,14 +393,27 @@ func (q *Queries) GetAgentClaimByAgent(ctx context.Context, agentID string) (Age
 	return i, err
 }
 
-const getAgentKeyByHash = `-- name: GetAgentKeyByHash :one
+const getAgentEventOffsetBySessionID = `-- name: GetAgentEventOffsetBySessionID :one
+SELECT session_id, last_event_id, updated_at
+FROM agent_event_offsets
+WHERE session_id = $1
+`
+
+func (q *Queries) GetAgentEventOffsetBySessionID(ctx context.Context, sessionID string) (AgentEventOffset, error) {
+	row := q.db.QueryRow(ctx, getAgentEventOffsetBySessionID, sessionID)
+	var i AgentEventOffset
+	err := row.Scan(&i.SessionID, &i.LastEventID, &i.UpdatedAt)
+	return i, err
+}
+
+const getAgentKeyByAPIKeyHash = `-- name: GetAgentKeyByAPIKeyHash :one
 SELECT id, agent_id, provider, api_key_hash, status, created_at
 FROM agent_keys
 WHERE api_key_hash = $1
 `
 
-func (q *Queries) GetAgentKeyByHash(ctx context.Context, apiKeyHash string) (AgentKey, error) {
-	row := q.db.QueryRow(ctx, getAgentKeyByHash, apiKeyHash)
+func (q *Queries) GetAgentKeyByAPIKeyHash(ctx context.Context, apiKeyHash string) (AgentKey, error) {
+	row := q.db.QueryRow(ctx, getAgentKeyByAPIKeyHash, apiKeyHash)
 	var i AgentKey
 	err := row.Scan(
 		&i.ID,
@@ -310,14 +426,38 @@ func (q *Queries) GetAgentKeyByHash(ctx context.Context, apiKeyHash string) (Age
 	return i, err
 }
 
-const getProviderRate = `-- name: GetProviderRate :one
+const getAgentSessionByID = `-- name: GetAgentSessionByID :one
+SELECT id, agent_id, room_id, table_id, seat_id, join_mode, status, expires_at, created_at, closed_at
+FROM agent_sessions
+WHERE id = $1
+`
+
+func (q *Queries) GetAgentSessionByID(ctx context.Context, id string) (AgentSession, error) {
+	row := q.db.QueryRow(ctx, getAgentSessionByID, id)
+	var i AgentSession
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.RoomID,
+		&i.TableID,
+		&i.SeatID,
+		&i.JoinMode,
+		&i.Status,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.ClosedAt,
+	)
+	return i, err
+}
+
+const getProviderRateByProvider = `-- name: GetProviderRateByProvider :one
 SELECT provider, price_per_1k_tokens_usd, cc_per_usd, weight, updated_at
 FROM provider_rates
 WHERE provider = $1
 `
 
-func (q *Queries) GetProviderRate(ctx context.Context, provider string) (ProviderRate, error) {
-	row := q.db.QueryRow(ctx, getProviderRate, provider)
+func (q *Queries) GetProviderRateByProvider(ctx context.Context, provider string) (ProviderRate, error) {
+	row := q.db.QueryRow(ctx, getProviderRateByProvider, provider)
 	var i ProviderRate
 	err := row.Scan(
 		&i.Provider,
@@ -329,14 +469,14 @@ func (q *Queries) GetProviderRate(ctx context.Context, provider string) (Provide
 	return i, err
 }
 
-const getRoom = `-- name: GetRoom :one
+const getRoomByID = `-- name: GetRoomByID :one
 SELECT id, name, min_buyin_cc, small_blind_cc, big_blind_cc, status, created_at
 FROM rooms
 WHERE id = $1
 `
 
-func (q *Queries) GetRoom(ctx context.Context, id string) (Room, error) {
-	row := q.db.QueryRow(ctx, getRoom, id)
+func (q *Queries) GetRoomByID(ctx context.Context, id string) (Room, error) {
+	row := q.db.QueryRow(ctx, getRoomByID, id)
 	var i Room
 	err := row.Scan(
 		&i.ID,
@@ -348,6 +488,42 @@ func (q *Queries) GetRoom(ctx context.Context, id string) (Room, error) {
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const insertAgentActionRequestIfAbsent = `-- name: InsertAgentActionRequestIfAbsent :execrows
+INSERT INTO agent_action_requests (id, session_id, request_id, turn_id, action_type, amount_cc, thought_log, accepted, reason)
+VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7::text, ''), $8, NULLIF($9::text, ''))
+ON CONFLICT (session_id, request_id) DO NOTHING
+`
+
+type InsertAgentActionRequestIfAbsentParams struct {
+	ID         string
+	SessionID  string
+	RequestID  string
+	TurnID     string
+	ActionType string
+	AmountCc   pgtype.Int8
+	Column7    string
+	Accepted   bool
+	Column9    string
+}
+
+func (q *Queries) InsertAgentActionRequestIfAbsent(ctx context.Context, arg InsertAgentActionRequestIfAbsentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertAgentActionRequestIfAbsent,
+		arg.ID,
+		arg.SessionID,
+		arg.RequestID,
+		arg.TurnID,
+		arg.ActionType,
+		arg.AmountCc,
+		arg.Column7,
+		arg.Accepted,
+		arg.Column9,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const insertLedgerEntry = `-- name: InsertLedgerEntry :exec
@@ -376,20 +552,20 @@ func (q *Queries) InsertLedgerEntry(ctx context.Context, arg InsertLedgerEntryPa
 	return err
 }
 
-const isAgentBlacklisted = `-- name: IsAgentBlacklisted :one
+const getAgentBlacklistReasonByAgentID = `-- name: GetAgentBlacklistReasonByAgentID :one
 SELECT reason
 FROM agent_blacklist
 WHERE agent_id = $1
 `
 
-func (q *Queries) IsAgentBlacklisted(ctx context.Context, agentID string) (string, error) {
-	row := q.db.QueryRow(ctx, isAgentBlacklisted, agentID)
+func (q *Queries) GetAgentBlacklistReasonByAgentID(ctx context.Context, agentID string) (string, error) {
+	row := q.db.QueryRow(ctx, getAgentBlacklistReasonByAgentID, agentID)
 	var reason string
 	err := row.Scan(&reason)
 	return reason, err
 }
 
-const lastSuccessfulKeyBindAt = `-- name: LastSuccessfulKeyBindAt :one
+const getLastSuccessfulKeyBindAtByAgentID = `-- name: GetLastSuccessfulKeyBindAtByAgentID :one
 SELECT created_at
 FROM agent_key_attempts
 WHERE agent_id = $1 AND status = 'success'
@@ -397,17 +573,17 @@ ORDER BY created_at DESC
 LIMIT 1
 `
 
-func (q *Queries) LastSuccessfulKeyBindAt(ctx context.Context, agentID string) (pgtype.Timestamptz, error) {
-	row := q.db.QueryRow(ctx, lastSuccessfulKeyBindAt, agentID)
+func (q *Queries) GetLastSuccessfulKeyBindAtByAgentID(ctx context.Context, agentID string) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getLastSuccessfulKeyBindAtByAgentID, agentID)
 	var created_at pgtype.Timestamptz
 	err := row.Scan(&created_at)
 	return created_at, err
 }
 
 const listAccounts = `-- name: ListAccounts :many
-SELECT agent_id, balance_cc, updated_at
-FROM accounts
-WHERE ($1::text = '' OR agent_id = $1)
+SELECT id AS agent_id, balance_cc, updated_at
+FROM agents
+WHERE ($1::text = '' OR id = $1)
 ORDER BY updated_at DESC
 LIMIT $2 OFFSET $3
 `
@@ -438,15 +614,15 @@ func (q *Queries) ListAccounts(ctx context.Context, arg ListAccountsParams) ([]A
 	return items, nil
 }
 
-const listAgentKeyAttemptStatuses = `-- name: ListAgentKeyAttemptStatuses :many
+const listAgentKeyAttemptStatusesByAgentID = `-- name: ListAgentKeyAttemptStatusesByAgentID :many
 SELECT status
 FROM agent_key_attempts
 WHERE agent_id = $1
 ORDER BY created_at DESC
 `
 
-func (q *Queries) ListAgentKeyAttemptStatuses(ctx context.Context, agentID string) ([]string, error) {
-	rows, err := q.db.Query(ctx, listAgentKeyAttemptStatuses, agentID)
+func (q *Queries) ListAgentKeyAttemptStatusesByAgentID(ctx context.Context, agentID string) ([]string, error) {
+	rows, err := q.db.Query(ctx, listAgentKeyAttemptStatusesByAgentID, agentID)
 	if err != nil {
 		return nil, err
 	}
@@ -806,9 +982,9 @@ func (q *Queries) RecordProxyCall(ctx context.Context, arg RecordProxyCallParams
 }
 
 const updateAccountBalance = `-- name: UpdateAccountBalance :exec
-UPDATE accounts
+UPDATE agents
 SET balance_cc = $1, updated_at = now()
-WHERE agent_id = $2
+WHERE id = $2
 `
 
 type UpdateAccountBalanceParams struct {
@@ -818,6 +994,43 @@ type UpdateAccountBalanceParams struct {
 
 func (q *Queries) UpdateAccountBalance(ctx context.Context, arg UpdateAccountBalanceParams) error {
 	_, err := q.db.Exec(ctx, updateAccountBalance, arg.BalanceCc, arg.AgentID)
+	return err
+}
+
+const updateAgentSessionMatch = `-- name: UpdateAgentSessionMatch :execrows
+UPDATE agent_sessions
+SET table_id = $2, seat_id = $3, status = 'active'
+WHERE id = $1
+`
+
+type UpdateAgentSessionMatchParams struct {
+	ID      string
+	TableID pgtype.Text
+	SeatID  pgtype.Int4
+}
+
+func (q *Queries) UpdateAgentSessionMatch(ctx context.Context, arg UpdateAgentSessionMatchParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateAgentSessionMatch, arg.ID, arg.TableID, arg.SeatID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const upsertAgentEventOffset = `-- name: UpsertAgentEventOffset :exec
+INSERT INTO agent_event_offsets (session_id, last_event_id)
+VALUES ($1, $2)
+ON CONFLICT (session_id)
+DO UPDATE SET last_event_id = EXCLUDED.last_event_id, updated_at = now()
+`
+
+type UpsertAgentEventOffsetParams struct {
+	SessionID   string
+	LastEventID string
+}
+
+func (q *Queries) UpsertAgentEventOffset(ctx context.Context, arg UpsertAgentEventOffsetParams) error {
+	_, err := q.db.Exec(ctx, upsertAgentEventOffset, arg.SessionID, arg.LastEventID)
 	return err
 }
 

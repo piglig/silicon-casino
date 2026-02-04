@@ -4,7 +4,7 @@ import "github.com/caarlos0/env/v11"
 
 type ServerConfig struct {
 	PostgresDSN string `env:"POSTGRES_DSN,required,notEmpty"`
-	WSAddr      string `env:"WS_ADDR" envDefault:":8080"`
+	HTTPAddr    string `env:"HTTP_ADDR" envDefault:":8080"`
 
 	AdminAPIKey string `env:"ADMIN_API_KEY"`
 

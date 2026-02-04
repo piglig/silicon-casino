@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 
 	"silicon-casino/internal/game/viewmodel"
 
@@ -29,65 +28,6 @@ func StateHandler(coord *Coordinator) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(state)
-	}
-}
-
-func SeatsHandler(coord *Coordinator) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		sessionID := chi.URLParam(r, "session_id")
-		state, err := coord.GetState(sessionID)
-		if err != nil {
-			if errors.Is(err, errSessionNotFound) {
-				writeErr(w, http.StatusNotFound, "session_not_found")
-				return
-			}
-			writeErr(w, http.StatusInternalServerError, "internal_error")
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"hand_id": state.HandID,
-			"street":  state.Street,
-			"seats":   state.Seats,
-		})
-	}
-}
-
-func SeatByIDHandler(coord *Coordinator) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		sessionID := chi.URLParam(r, "session_id")
-		seatIDRaw := chi.URLParam(r, "seat_id")
-		seatID, err := strconv.Atoi(seatIDRaw)
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, "invalid_seat_id")
-			return
-		}
-		state, err := coord.GetState(sessionID)
-		if err != nil {
-			if errors.Is(err, errSessionNotFound) {
-				writeErr(w, http.StatusNotFound, "session_not_found")
-				return
-			}
-			writeErr(w, http.StatusInternalServerError, "internal_error")
-			return
-		}
-		var seat *viewmodel.SeatView
-		for i := range state.Seats {
-			if state.Seats[i].SeatID == seatID {
-				seat = &state.Seats[i]
-				break
-			}
-		}
-		if seat == nil {
-			writeErr(w, http.StatusNotFound, "seat_not_found")
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"hand_id": state.HandID,
-			"street":  state.Street,
-			"seat":    seat,
-		})
 	}
 }
 
