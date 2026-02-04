@@ -1,7 +1,3 @@
--- NOTE:
--- The canonical schema source is migrations/*.sql managed by golang-migrate.
--- This file is kept as a mirror for sqlc and local readability.
-
 CREATE TABLE IF NOT EXISTS agents (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,

@@ -8,12 +8,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"silicon-casino/internal/config"
 	"silicon-casino/internal/store"
 	"silicon-casino/internal/testutil"
 )
 
 func TestBindKeyHandler_Success(t *testing.T) {
-	t.Setenv("OPENAI_BASE_URL", mockVendorServer(t, http.StatusOK))
 	st, cleanup := testutil.OpenTestStore(t)
 	defer cleanup()
 
@@ -36,7 +36,7 @@ func TestBindKeyHandler_Success(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	rr := httptest.NewRecorder()
 
-	bindKeyHandler(st).ServeHTTP(rr, req)
+	bindKeyHandler(st, testServerConfig(http.StatusOK, t)).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -66,7 +66,6 @@ func TestBindKeyHandler_Success(t *testing.T) {
 }
 
 func TestBindKeyHandler_DuplicateKey(t *testing.T) {
-	t.Setenv("OPENAI_BASE_URL", mockVendorServer(t, http.StatusOK))
 	st, cleanup := testutil.OpenTestStore(t)
 	defer cleanup()
 
@@ -88,7 +87,7 @@ func TestBindKeyHandler_DuplicateKey(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/bind_key", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+apiKey1)
 	rr := httptest.NewRecorder()
-	bindKeyHandler(st).ServeHTTP(rr, req)
+	bindKeyHandler(st, testServerConfig(http.StatusOK, t)).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected first bind 200, got %d", rr.Code)
 	}
@@ -105,14 +104,13 @@ func TestBindKeyHandler_DuplicateKey(t *testing.T) {
 	req2 := httptest.NewRequest(http.MethodPost, "/api/agents/bind_key", bytes.NewReader(body))
 	req2.Header.Set("Authorization", "Bearer "+apiKey2)
 	rr2 := httptest.NewRecorder()
-	bindKeyHandler(st).ServeHTTP(rr2, req2)
+	bindKeyHandler(st, testServerConfig(http.StatusOK, t)).ServeHTTP(rr2, req2)
 	if rr2.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d: %s", rr2.Code, rr2.Body.String())
 	}
 }
 
 func TestBindKeyHandler_BudgetLimit(t *testing.T) {
-	t.Setenv("OPENAI_BASE_URL", mockVendorServer(t, http.StatusOK))
 	st, cleanup := testutil.OpenTestStore(t)
 	defer cleanup()
 
@@ -135,14 +133,13 @@ func TestBindKeyHandler_BudgetLimit(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	rr := httptest.NewRecorder()
 
-	bindKeyHandler(st).ServeHTTP(rr, req)
+	bindKeyHandler(st, testServerConfig(http.StatusOK, t)).ServeHTTP(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
 
 func TestBindKeyHandler_Cooldown(t *testing.T) {
-	t.Setenv("OPENAI_BASE_URL", mockVendorServer(t, http.StatusOK))
 	st, cleanup := testutil.OpenTestStore(t)
 	defer cleanup()
 
@@ -164,7 +161,7 @@ func TestBindKeyHandler_Cooldown(t *testing.T) {
 	req1 := httptest.NewRequest(http.MethodPost, "/api/agents/bind_key", bytes.NewReader(body1))
 	req1.Header.Set("Authorization", "Bearer "+apiKey)
 	rr1 := httptest.NewRecorder()
-	bindKeyHandler(st).ServeHTTP(rr1, req1)
+	bindKeyHandler(st, testServerConfig(http.StatusOK, t)).ServeHTTP(rr1, req1)
 	if rr1.Code != http.StatusOK {
 		t.Fatalf("expected first bind 200, got %d: %s", rr1.Code, rr1.Body.String())
 	}
@@ -173,14 +170,13 @@ func TestBindKeyHandler_Cooldown(t *testing.T) {
 	req2 := httptest.NewRequest(http.MethodPost, "/api/agents/bind_key", bytes.NewReader(body2))
 	req2.Header.Set("Authorization", "Bearer "+apiKey)
 	rr2 := httptest.NewRecorder()
-	bindKeyHandler(st).ServeHTTP(rr2, req2)
+	bindKeyHandler(st, testServerConfig(http.StatusOK, t)).ServeHTTP(rr2, req2)
 	if rr2.Code != http.StatusTooManyRequests {
 		t.Fatalf("expected 429, got %d: %s", rr2.Code, rr2.Body.String())
 	}
 }
 
 func TestBindKeyHandler_BlacklistAfterInvalidKeys(t *testing.T) {
-	t.Setenv("OPENAI_BASE_URL", mockVendorServer(t, http.StatusUnauthorized))
 	st, cleanup := testutil.OpenTestStore(t)
 	defer cleanup()
 
@@ -203,7 +199,7 @@ func TestBindKeyHandler_BlacklistAfterInvalidKeys(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/agents/bind_key", bytes.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 		rr := httptest.NewRecorder()
-		bindKeyHandler(st).ServeHTTP(rr, req)
+		bindKeyHandler(st, testServerConfig(http.StatusUnauthorized, t)).ServeHTTP(rr, req)
 		if i < 2 && rr.Code != http.StatusUnauthorized {
 			t.Fatalf("expected 401, got %d: %s", rr.Code, rr.Body.String())
 		}
@@ -284,4 +280,13 @@ func mockVendorServer(t *testing.T, status int) string {
 	}))
 	t.Cleanup(srv.Close)
 	return srv.URL
+}
+
+func testServerConfig(status int, t *testing.T) config.ServerConfig {
+	return config.ServerConfig{
+		MaxBudgetUSD:     20,
+		BindCooldownMins: 60,
+		OpenAIBaseURL:    mockVendorServer(t, status),
+		KimiBaseURL:      mockVendorServer(t, status),
+	}
 }

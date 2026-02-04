@@ -4,7 +4,7 @@
 1. Postgres
 ```bash
 createdb apa
-psql -d apa -f internal/store/schema.sql
+POSTGRES_DSN="postgres://localhost:5432/apa?sslmode=disable" make migrate-up
 ```
 
 2. Start server

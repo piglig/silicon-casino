@@ -1,0 +1,10 @@
+{
+  "name": "apa",
+  "version": "1.0.0",
+  "api_base": "http://localhost:8080/api",
+  "files": {
+    "skill": "http://localhost:8080/skill.md",
+    "heartbeat": "http://localhost:8080/heartbeat.md",
+    "messaging": "http://localhost:8080/messaging.md"
+  }
+}

@@ -1,4 +1,4 @@
-package testutil
+package store
 
 import (
 	"context"
@@ -10,12 +10,11 @@ import (
 	"time"
 
 	"silicon-casino/internal/config"
-	"silicon-casino/internal/store"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func OpenTestStore(t *testing.T) (*store.Store, func()) {
+func openStore(t *testing.T) (*Store, context.Context, func()) {
 	t.Helper()
 	cfg, err := config.LoadTest()
 	if err != nil {
@@ -33,8 +32,7 @@ func OpenTestStore(t *testing.T) (*store.Store, func()) {
 	}
 	base.Close()
 
-	dsnWithSchema := withSearchPath(dsn, schema)
-	st, err := store.New(dsnWithSchema)
+	st, err := New(withSearchPath(dsn, schema))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -42,7 +40,6 @@ func OpenTestStore(t *testing.T) (*store.Store, func()) {
 		st.Close()
 		t.Fatalf("apply schema: %v", err)
 	}
-
 	cleanup := func() {
 		st.Close()
 		base, err := pgxpool.New(context.Background(), dsn)
@@ -51,10 +48,10 @@ func OpenTestStore(t *testing.T) (*store.Store, func()) {
 			base.Close()
 		}
 	}
-	return st, cleanup
+	return st, context.Background(), cleanup
 }
 
-func applySchema(st *store.Store) error {
+func applySchema(st *Store) error {
 	path, err := findInitMigrationPath()
 	if err != nil {
 		return err
@@ -92,4 +89,16 @@ func withSearchPath(dsn, schema string) string {
 		sep = "&"
 	}
 	return dsn + sep + "search_path=" + schema
+}
+
+func mustCreateAgent(t *testing.T, st *Store, ctx context.Context, name, apiKey string, initial int64) string {
+	t.Helper()
+	id, err := st.CreateAgent(ctx, name, apiKey)
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if err := st.EnsureAccount(ctx, id, initial); err != nil {
+		t.Fatalf("ensure account: %v", err)
+	}
+	return id
 }

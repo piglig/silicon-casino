@@ -3,27 +3,37 @@ package store
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"time"
-	_ "github.com/jackc/pgx/v5/stdlib"
+
+	"silicon-casino/internal/store/sqlcgen"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var ErrNotFound = errors.New("not found")
 
 // Store wraps DB access.
 type Store struct {
-	DB *sql.DB
+	Pool *pgxpool.Pool
+	q    *sqlcgen.Queries
 }
 
 func New(dsn string) (*Store, error) {
-	db, err := sql.Open("pgx", dsn)
+	pool, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {
 		return nil, err
 	}
-	return &Store{DB: db}, nil
+	return &Store{Pool: pool, q: sqlcgen.New(pool)}, nil
+}
+
+func (s *Store) Close() {
+	if s.Pool != nil {
+		s.Pool.Close()
+	}
 }
 
 func HashAPIKey(key string) string {
@@ -33,32 +43,36 @@ func HashAPIKey(key string) string {
 
 func (s *Store) GetAgentByAPIKey(ctx context.Context, apiKey string) (*Agent, error) {
 	hash := HashAPIKey(apiKey)
-	row := s.DB.QueryRowContext(ctx, `SELECT id, name, api_key_hash, status, created_at FROM agents WHERE api_key_hash = $1`, hash)
-	var a Agent
-	if err := row.Scan(&a.ID, &a.Name, &a.APIKeyHash, &a.Status, &a.CreatedAt); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
-		}
-		return nil, err
+	row, err := s.q.GetAgentByAPIKeyHash(ctx, hash)
+	if err != nil {
+		return nil, mapNotFound(err)
 	}
-	return &a, nil
+	return &Agent{
+		ID:         row.ID,
+		Name:       row.Name,
+		APIKeyHash: row.ApiKeyHash,
+		Status:     row.Status,
+		CreatedAt:  row.CreatedAt.Time,
+	}, nil
 }
 
 func (s *Store) GetAccountBalance(ctx context.Context, agentID string) (int64, error) {
-	row := s.DB.QueryRowContext(ctx, `SELECT balance_cc FROM accounts WHERE agent_id = $1`, agentID)
-	var bal int64
-	if err := row.Scan(&bal); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return 0, ErrNotFound
-		}
-		return 0, err
+	bal, err := s.q.GetAccountBalance(ctx, agentID)
+	if err != nil {
+		return 0, mapNotFound(err)
 	}
 	return bal, nil
 }
 
 func (s *Store) CreateTable(ctx context.Context, roomID, status string, sb, bb int64) (string, error) {
 	id := NewID()
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO tables (id, room_id, status, small_blind_cc, big_blind_cc) VALUES ($1,$2,$3,$4,$5)`, id, roomID, status, sb, bb)
+	err := s.q.CreateTable(ctx, sqlcgen.CreateTableParams{
+		ID:           id,
+		RoomID:       textParam(roomID),
+		Status:       status,
+		SmallBlindCc: sb,
+		BigBlindCc:   bb,
+	})
 	return id, err
 }
 
@@ -66,65 +80,60 @@ func (s *Store) ListTables(ctx context.Context, roomID string, limit, offset int
 	if limit <= 0 {
 		limit = 50
 	}
-	query := `SELECT id, room_id, status, small_blind_cc, big_blind_cc, created_at
-		FROM tables
-		WHERE status = 'active'`
-	args := []any{}
-	if roomID != "" {
-		query += " AND room_id = $1"
-		args = append(args, roomID)
-	}
-	query += " ORDER BY created_at DESC LIMIT $2 OFFSET $3"
-	if roomID == "" {
-		query = `SELECT id, room_id, status, small_blind_cc, big_blind_cc, created_at
-			FROM tables
-			WHERE status = 'active'
-			ORDER BY created_at DESC LIMIT $1 OFFSET $2`
-		args = append(args, limit, offset)
-	} else {
-		args = append(args, limit, offset)
-	}
-	rows, err := s.DB.QueryContext(ctx, query, args...)
+	rows, err := s.q.ListTables(ctx, sqlcgen.ListTablesParams{
+		Column1: roomID,
+		Limit:   int32(limit),
+		Offset:  int32(offset),
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := []Table{}
-	for rows.Next() {
-		var t Table
-		if err := rows.Scan(&t.ID, &t.RoomID, &t.Status, &t.SmallBlindCC, &t.BigBlindCC, &t.CreatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, t)
+	out := make([]Table, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, Table{
+			ID:           r.ID,
+			RoomID:       textVal(r.RoomID),
+			Status:       r.Status,
+			SmallBlindCC: r.SmallBlindCc,
+			BigBlindCC:   r.BigBlindCc,
+			CreatedAt:    r.CreatedAt.Time,
+		})
 	}
 	return out, nil
 }
 
 func (s *Store) CreateHand(ctx context.Context, tableID string) (string, error) {
 	id := NewID()
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO hands (id, table_id) VALUES ($1,$2)`, id, tableID)
+	err := s.q.CreateHand(ctx, sqlcgen.CreateHandParams{ID: id, TableID: tableID})
 	return id, err
 }
 
 func (s *Store) EndHand(ctx context.Context, handID string) error {
-	_, err := s.DB.ExecContext(ctx, `UPDATE hands SET ended_at = now() WHERE id = $1`, handID)
-	return err
+	return s.q.EndHand(ctx, handID)
 }
 
 func (s *Store) RecordAction(ctx context.Context, handID, agentID, actionType string, amount int64) error {
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO actions (hand_id, agent_id, action_type, amount_cc) VALUES ($1,$2,$3,$4)`, handID, agentID, actionType, amount)
-	return err
-}
-
-func (s *Store) RecordLedgerEntry(ctx context.Context, tx *sql.Tx, agentID, entryType string, amount int64, refType, refID string) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO ledger_entries (id, agent_id, type, amount_cc, ref_type, ref_id) VALUES ($1,$2,$3,$4,$5,$6)`, NewID(), agentID, entryType, amount, refType, refID)
-	return err
+	return s.q.RecordAction(ctx, sqlcgen.RecordActionParams{
+		ID:         NewID(),
+		HandID:     handID,
+		AgentID:    agentID,
+		ActionType: actionType,
+		AmountCc:   amount,
+	})
 }
 
 func (s *Store) RecordProxyCall(ctx context.Context, agentID, model, provider string, prompt, completion, total int, cost int64) (string, error) {
 	id := NewID()
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO proxy_calls (id, agent_id, prompt_tokens, completion_tokens, total_tokens, model, provider, cost_cc) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-		id, agentID, prompt, completion, total, model, provider, cost)
+	err := s.q.RecordProxyCall(ctx, sqlcgen.RecordProxyCallParams{
+		ID:               id,
+		AgentID:          agentID,
+		PromptTokens:     int32(prompt),
+		CompletionTokens: int32(completion),
+		TotalTokens:      int4Param(int32(total)),
+		Model:            textParam(model),
+		Provider:         textParam(provider),
+		CostCc:           cost,
+	})
 	return id, err
 }
 
@@ -132,29 +141,38 @@ func (s *Store) Debit(ctx context.Context, agentID string, amount int64, entryTy
 	if amount < 0 {
 		return 0, errors.New("amount must be positive")
 	}
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{})
+	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer tx.Rollback(ctx)
 
-	var bal int64
-	row := tx.QueryRowContext(ctx, `SELECT balance_cc FROM accounts WHERE agent_id = $1 FOR UPDATE`, agentID)
-	if err := row.Scan(&bal); err != nil {
-		return 0, err
+	qtx := s.q.WithTx(tx)
+	bal, err := qtx.GetAccountBalanceForUpdate(ctx, agentID)
+	if err != nil {
+		return 0, mapNotFound(err)
 	}
 	if bal < amount {
 		return 0, errors.New("insufficient_balance")
 	}
 	newBal := bal - amount
-	_, err = tx.ExecContext(ctx, `UPDATE accounts SET balance_cc = $1, updated_at = now() WHERE agent_id = $2`, newBal, agentID)
-	if err != nil {
+	if err := qtx.UpdateAccountBalance(ctx, sqlcgen.UpdateAccountBalanceParams{
+		BalanceCc: newBal,
+		AgentID:   agentID,
+	}); err != nil {
 		return 0, err
 	}
-	if err := s.RecordLedgerEntry(ctx, tx, agentID, entryType, -amount, refType, refID); err != nil {
+	if err := qtx.InsertLedgerEntry(ctx, sqlcgen.InsertLedgerEntryParams{
+		ID:       NewID(),
+		AgentID:  agentID,
+		Type:     entryType,
+		AmountCc: -amount,
+		RefType:  refType,
+		RefID:    refID,
+	}); err != nil {
 		return 0, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit(ctx); err != nil {
 		return 0, err
 	}
 	return newBal, nil
@@ -164,91 +182,115 @@ func (s *Store) Credit(ctx context.Context, agentID string, amount int64, entryT
 	if amount < 0 {
 		return 0, errors.New("amount must be positive")
 	}
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{})
+	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer tx.Rollback(ctx)
 
-	var bal int64
-	row := tx.QueryRowContext(ctx, `SELECT balance_cc FROM accounts WHERE agent_id = $1 FOR UPDATE`, agentID)
-	if err := row.Scan(&bal); err != nil {
-		return 0, err
+	qtx := s.q.WithTx(tx)
+	bal, err := qtx.GetAccountBalanceForUpdate(ctx, agentID)
+	if err != nil {
+		return 0, mapNotFound(err)
 	}
 	newBal := bal + amount
-	_, err = tx.ExecContext(ctx, `UPDATE accounts SET balance_cc = $1, updated_at = now() WHERE agent_id = $2`, newBal, agentID)
-	if err != nil {
+	if err := qtx.UpdateAccountBalance(ctx, sqlcgen.UpdateAccountBalanceParams{
+		BalanceCc: newBal,
+		AgentID:   agentID,
+	}); err != nil {
 		return 0, err
 	}
-	if err := s.RecordLedgerEntry(ctx, tx, agentID, entryType, amount, refType, refID); err != nil {
+	if err := qtx.InsertLedgerEntry(ctx, sqlcgen.InsertLedgerEntryParams{
+		ID:       NewID(),
+		AgentID:  agentID,
+		Type:     entryType,
+		AmountCc: amount,
+		RefType:  refType,
+		RefID:    refID,
+	}); err != nil {
 		return 0, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit(ctx); err != nil {
 		return 0, err
 	}
 	return newBal, nil
 }
 
 func (s *Store) EnsureAccount(ctx context.Context, agentID string, initial int64) error {
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO accounts (agent_id, balance_cc) VALUES ($1,$2) ON CONFLICT (agent_id) DO NOTHING`, agentID, initial)
-	return err
+	return s.q.EnsureAccount(ctx, sqlcgen.EnsureAccountParams{
+		AgentID:   agentID,
+		BalanceCc: initial,
+	})
 }
 
 func (s *Store) CreateAgent(ctx context.Context, name, apiKey string) (string, error) {
 	id := NewID()
 	hash := HashAPIKey(apiKey)
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO agents (id, name, api_key_hash, status) VALUES ($1,$2,$3,'pending')`, id, name, hash)
+	err := s.q.CreateAgent(ctx, sqlcgen.CreateAgentParams{
+		ID:         id,
+		Name:       name,
+		ApiKeyHash: hash,
+	})
 	return id, err
 }
 
 func (s *Store) Ping(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	return s.DB.PingContext(ctx)
+	return s.Pool.Ping(ctx)
 }
 
 func (s *Store) ListRooms(ctx context.Context) ([]Room, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id, name, min_buyin_cc, small_blind_cc, big_blind_cc, status, created_at FROM rooms WHERE status = 'active' ORDER BY min_buyin_cc ASC`)
+	rows, err := s.q.ListRooms(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := []Room{}
-	for rows.Next() {
-		var r Room
-		if err := rows.Scan(&r.ID, &r.Name, &r.MinBuyinCC, &r.SmallBlindCC, &r.BigBlindCC, &r.Status, &r.CreatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, r)
+	out := make([]Room, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, Room{
+			ID:           r.ID,
+			Name:         r.Name,
+			MinBuyinCC:   r.MinBuyinCc,
+			SmallBlindCC: r.SmallBlindCc,
+			BigBlindCC:   r.BigBlindCc,
+			Status:       r.Status,
+			CreatedAt:    r.CreatedAt.Time,
+		})
 	}
 	return out, nil
 }
 
 func (s *Store) GetRoom(ctx context.Context, id string) (*Room, error) {
-	row := s.DB.QueryRowContext(ctx, `SELECT id, name, min_buyin_cc, small_blind_cc, big_blind_cc, status, created_at FROM rooms WHERE id = $1`, id)
-	var r Room
-	if err := row.Scan(&r.ID, &r.Name, &r.MinBuyinCC, &r.SmallBlindCC, &r.BigBlindCC, &r.Status, &r.CreatedAt); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
-		}
-		return nil, err
+	r, err := s.q.GetRoom(ctx, id)
+	if err != nil {
+		return nil, mapNotFound(err)
 	}
-	return &r, nil
+	return &Room{
+		ID:           r.ID,
+		Name:         r.Name,
+		MinBuyinCC:   r.MinBuyinCc,
+		SmallBlindCC: r.SmallBlindCc,
+		BigBlindCC:   r.BigBlindCc,
+		Status:       r.Status,
+		CreatedAt:    r.CreatedAt.Time,
+	}, nil
 }
 
 func (s *Store) CreateRoom(ctx context.Context, name string, minBuyin, sb, bb int64) (string, error) {
 	id := NewID()
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO rooms (id, name, min_buyin_cc, small_blind_cc, big_blind_cc, status) VALUES ($1,$2,$3,$4,$5,'active')`, id, name, minBuyin, sb, bb)
+	err := s.q.CreateRoom(ctx, sqlcgen.CreateRoomParams{
+		ID:           id,
+		Name:         name,
+		MinBuyinCc:   minBuyin,
+		SmallBlindCc: sb,
+		BigBlindCc:   bb,
+	})
 	return id, err
 }
 
 func (s *Store) CountRooms(ctx context.Context) (int, error) {
-	row := s.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM rooms`)
-	var c int
-	if err := row.Scan(&c); err != nil {
-		return 0, err
-	}
-	return c, nil
+	c, err := s.q.CountRooms(ctx)
+	return int(c), err
 }
 
 func (s *Store) EnsureDefaultRooms(ctx context.Context) error {
@@ -259,12 +301,10 @@ func (s *Store) EnsureDefaultRooms(ctx context.Context) error {
 	if c > 0 {
 		return nil
 	}
-	_, err = s.CreateRoom(ctx, "Low", 1000, 50, 100)
-	if err != nil {
+	if _, err := s.CreateRoom(ctx, "Low", 1000, 50, 100); err != nil {
 		return err
 	}
-	_, err = s.CreateRoom(ctx, "Mid", 5000, 100, 200)
-	if err != nil {
+	if _, err := s.CreateRoom(ctx, "Mid", 5000, 100, 200); err != nil {
 		return err
 	}
 	_, err = s.CreateRoom(ctx, "High", 20000, 500, 1000)
@@ -282,95 +322,114 @@ func (s *Store) ListAgents(ctx context.Context, limit, offset int) ([]Agent, err
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT id, name, api_key_hash, status, created_at FROM agents ORDER BY created_at DESC LIMIT $1 OFFSET $2`, limit, offset)
+	rows, err := s.q.ListAgents(ctx, sqlcgen.ListAgentsParams{
+		Limit:  int32(limit),
+		Offset: int32(offset),
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := []Agent{}
-	for rows.Next() {
-		var a Agent
-		if err := rows.Scan(&a.ID, &a.Name, &a.APIKeyHash, &a.Status, &a.CreatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, a)
+	out := make([]Agent, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, Agent{
+			ID:         r.ID,
+			Name:       r.Name,
+			APIKeyHash: r.ApiKeyHash,
+			Status:     r.Status,
+			CreatedAt:  r.CreatedAt.Time,
+		})
 	}
 	return out, nil
 }
 
 func (s *Store) CreateAgentClaim(ctx context.Context, agentID, claimCode string) (string, error) {
 	id := NewID()
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO agent_claims (id, agent_id, claim_code, status) VALUES ($1,$2,$3,'pending')`, id, agentID, claimCode)
+	err := s.q.CreateAgentClaim(ctx, sqlcgen.CreateAgentClaimParams{
+		ID:        id,
+		AgentID:   agentID,
+		ClaimCode: claimCode,
+	})
 	return id, err
 }
 
 func (s *Store) GetAgentClaimByAgent(ctx context.Context, agentID string) (*AgentClaim, error) {
-	row := s.DB.QueryRowContext(ctx, `SELECT id, agent_id, claim_code, status, created_at FROM agent_claims WHERE agent_id = $1`, agentID)
-	var c AgentClaim
-	if err := row.Scan(&c.ID, &c.AgentID, &c.ClaimCode, &c.Status, &c.CreatedAt); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
-		}
-		return nil, err
+	r, err := s.q.GetAgentClaimByAgent(ctx, agentID)
+	if err != nil {
+		return nil, mapNotFound(err)
 	}
-	return &c, nil
+	return &AgentClaim{
+		ID:        r.ID,
+		AgentID:   r.AgentID,
+		ClaimCode: r.ClaimCode,
+		Status:    r.Status,
+		CreatedAt: r.CreatedAt.Time,
+	}, nil
 }
 
 func (s *Store) MarkAgentClaimed(ctx context.Context, agentID string) error {
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{})
+	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `UPDATE agents SET status = 'claimed' WHERE id = $1`, agentID); err != nil {
+	defer tx.Rollback(ctx)
+	qtx := s.q.WithTx(tx)
+	if err := qtx.MarkAgentStatusClaimed(ctx, agentID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE agent_claims SET status = 'claimed' WHERE agent_id = $1`, agentID); err != nil {
+	if err := qtx.MarkAgentClaimClaimed(ctx, agentID); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return tx.Commit(ctx)
 }
 
 func (s *Store) CreateAgentKey(ctx context.Context, agentID, provider, apiKeyHash string) (string, error) {
 	id := NewID()
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO agent_keys (id, agent_id, provider, api_key_hash, status) VALUES ($1,$2,$3,$4,'active')`, id, agentID, provider, apiKeyHash)
+	err := s.q.CreateAgentKey(ctx, sqlcgen.CreateAgentKeyParams{
+		ID:         id,
+		AgentID:    agentID,
+		Provider:   provider,
+		ApiKeyHash: apiKeyHash,
+	})
 	return id, err
 }
 
 func (s *Store) GetAgentKeyByHash(ctx context.Context, apiKeyHash string) (*AgentKey, error) {
-	row := s.DB.QueryRowContext(ctx, `SELECT id, agent_id, provider, api_key_hash, status, created_at FROM agent_keys WHERE api_key_hash = $1`, apiKeyHash)
-	var k AgentKey
-	if err := row.Scan(&k.ID, &k.AgentID, &k.Provider, &k.APIKeyHash, &k.Status, &k.CreatedAt); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
-		}
-		return nil, err
+	r, err := s.q.GetAgentKeyByHash(ctx, apiKeyHash)
+	if err != nil {
+		return nil, mapNotFound(err)
 	}
-	return &k, nil
+	return &AgentKey{
+		ID:         r.ID,
+		AgentID:    r.AgentID,
+		Provider:   r.Provider,
+		APIKeyHash: r.ApiKeyHash,
+		Status:     r.Status,
+		CreatedAt:  r.CreatedAt.Time,
+	}, nil
 }
 
 func (s *Store) ListProviderRates(ctx context.Context) ([]ProviderRate, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT provider, price_per_1k_tokens_usd, cc_per_usd, weight, updated_at FROM provider_rates ORDER BY provider ASC`)
+	rows, err := s.q.ListProviderRates(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := []ProviderRate{}
-	for rows.Next() {
-		var r ProviderRate
-		if err := rows.Scan(&r.Provider, &r.PricePer1KTokensUSD, &r.CCPerUSD, &r.Weight, &r.UpdatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, r)
+	out := make([]ProviderRate, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, ProviderRate{
+			Provider:            r.Provider,
+			PricePer1KTokensUSD: r.PricePer1kTokensUsd,
+			CCPerUSD:            r.CcPerUsd,
+			Weight:              r.Weight,
+			UpdatedAt:           r.UpdatedAt.Time,
+		})
 	}
 	return out, nil
 }
 
 func (s *Store) IsAgentBlacklisted(ctx context.Context, agentID string) (bool, string, error) {
-	row := s.DB.QueryRowContext(ctx, `SELECT reason FROM agent_blacklist WHERE agent_id = $1`, agentID)
-	var reason string
-	if err := row.Scan(&reason); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+	reason, err := s.q.IsAgentBlacklisted(ctx, agentID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return false, "", nil
 		}
 		return false, "", err
@@ -379,39 +438,40 @@ func (s *Store) IsAgentBlacklisted(ctx context.Context, agentID string) (bool, s
 }
 
 func (s *Store) BlacklistAgent(ctx context.Context, agentID, reason string) error {
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO agent_blacklist (agent_id, reason) VALUES ($1,$2) ON CONFLICT (agent_id) DO UPDATE SET reason = EXCLUDED.reason, created_at = now()`, agentID, reason)
-	return err
+	return s.q.BlacklistAgent(ctx, sqlcgen.BlacklistAgentParams{AgentID: agentID, Reason: reason})
 }
 
 func (s *Store) RecordAgentKeyAttempt(ctx context.Context, agentID, provider, status string) error {
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO agent_key_attempts (id, agent_id, provider, status) VALUES ($1,$2,$3,$4)`, NewID(), agentID, provider, status)
-	return err
+	return s.q.RecordAgentKeyAttempt(ctx, sqlcgen.RecordAgentKeyAttemptParams{
+		ID:       NewID(),
+		AgentID:  agentID,
+		Provider: provider,
+		Status:   status,
+	})
 }
 
 func (s *Store) LastSuccessfulKeyBindAt(ctx context.Context, agentID string) (*time.Time, error) {
-	row := s.DB.QueryRowContext(ctx, `SELECT created_at FROM agent_key_attempts WHERE agent_id = $1 AND status = 'success' ORDER BY created_at DESC LIMIT 1`, agentID)
-	var t time.Time
-	if err := row.Scan(&t); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+	ts, err := s.q.LastSuccessfulKeyBindAt(ctx, agentID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
 	}
+	if !ts.Valid {
+		return nil, nil
+	}
+	t := ts.Time
 	return &t, nil
 }
 
 func (s *Store) CountConsecutiveInvalidKeyAttempts(ctx context.Context, agentID string) (int, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT status FROM agent_key_attempts WHERE agent_id = $1 ORDER BY created_at DESC`, agentID)
+	statuses, err := s.q.ListAgentKeyAttemptStatuses(ctx, agentID)
 	if err != nil {
 		return 0, err
 	}
-	defer rows.Close()
 	count := 0
-	for rows.Next() {
-		var status string
-		if err := rows.Scan(&status); err != nil {
-			return 0, err
-		}
+	for _, status := range statuses {
 		if status == "success" {
 			break
 		}
@@ -423,38 +483,36 @@ func (s *Store) CountConsecutiveInvalidKeyAttempts(ctx context.Context, agentID 
 }
 
 func (s *Store) GetProviderRate(ctx context.Context, provider string) (*ProviderRate, error) {
-	row := s.DB.QueryRowContext(ctx, `SELECT provider, price_per_1k_tokens_usd, cc_per_usd, weight, updated_at FROM provider_rates WHERE provider = $1`, provider)
-	var r ProviderRate
-	if err := row.Scan(&r.Provider, &r.PricePer1KTokensUSD, &r.CCPerUSD, &r.Weight, &r.UpdatedAt); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
-		}
-		return nil, err
+	r, err := s.q.GetProviderRate(ctx, provider)
+	if err != nil {
+		return nil, mapNotFound(err)
 	}
-	return &r, nil
+	return &ProviderRate{
+		Provider:            r.Provider,
+		PricePer1KTokensUSD: r.PricePer1kTokensUsd,
+		CCPerUSD:            r.CcPerUsd,
+		Weight:              r.Weight,
+		UpdatedAt:           r.UpdatedAt.Time,
+	}, nil
 }
 
 func (s *Store) UpsertProviderRate(ctx context.Context, provider string, pricePer1KTokensUSD, ccPerUSD, weight float64) error {
-	_, err := s.DB.ExecContext(ctx, `
-		INSERT INTO provider_rates (provider, price_per_1k_tokens_usd, cc_per_usd, weight)
-		VALUES ($1,$2,$3,$4)
-		ON CONFLICT (provider) DO UPDATE
-		SET price_per_1k_tokens_usd = EXCLUDED.price_per_1k_tokens_usd,
-		    cc_per_usd = EXCLUDED.cc_per_usd,
-		    weight = EXCLUDED.weight,
-		    updated_at = now()
-	`, provider, pricePer1KTokensUSD, ccPerUSD, weight)
-	return err
+	return s.q.UpsertProviderRate(ctx, sqlcgen.UpsertProviderRateParams{
+		Provider:            provider,
+		PricePer1kTokensUsd: pricePer1KTokensUSD,
+		CcPerUsd:            ccPerUSD,
+		Weight:              weight,
+	})
 }
 
 func (s *Store) EnsureDefaultProviderRates(ctx context.Context, defaults []ProviderRate) error {
 	for _, r := range defaults {
-		_, err := s.DB.ExecContext(ctx, `
-			INSERT INTO provider_rates (provider, price_per_1k_tokens_usd, cc_per_usd, weight)
-			VALUES ($1,$2,$3,$4)
-			ON CONFLICT (provider) DO NOTHING
-		`, r.Provider, r.PricePer1KTokensUSD, r.CCPerUSD, r.Weight)
-		if err != nil {
+		if err := s.q.EnsureDefaultProviderRate(ctx, sqlcgen.EnsureDefaultProviderRateParams{
+			Provider:            r.Provider,
+			PricePer1kTokensUsd: r.PricePer1KTokensUSD,
+			CcPerUsd:            r.CCPerUSD,
+			Weight:              r.Weight,
+		}); err != nil {
 			return err
 		}
 	}
@@ -465,24 +523,21 @@ func (s *Store) ListAccounts(ctx context.Context, agentID string, limit, offset 
 	if limit <= 0 {
 		limit = 50
 	}
-	var rows *sql.Rows
-	var err error
-	if agentID == "" {
-		rows, err = s.DB.QueryContext(ctx, `SELECT agent_id, balance_cc, updated_at FROM accounts ORDER BY updated_at DESC LIMIT $1 OFFSET $2`, limit, offset)
-	} else {
-		rows, err = s.DB.QueryContext(ctx, `SELECT agent_id, balance_cc, updated_at FROM accounts WHERE agent_id = $1 ORDER BY updated_at DESC LIMIT $2 OFFSET $3`, agentID, limit, offset)
-	}
+	rows, err := s.q.ListAccounts(ctx, sqlcgen.ListAccountsParams{
+		Column1: agentID,
+		Limit:   int32(limit),
+		Offset:  int32(offset),
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := []Account{}
-	for rows.Next() {
-		var a Account
-		if err := rows.Scan(&a.AgentID, &a.BalanceCC, &a.UpdatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, a)
+	out := make([]Account, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, Account{
+			AgentID:   r.AgentID,
+			BalanceCC: r.BalanceCc,
+			UpdatedAt: r.UpdatedAt.Time,
+		})
 	}
 	return out, nil
 }
@@ -491,38 +546,28 @@ func (s *Store) ListLedgerEntries(ctx context.Context, f LedgerFilter, limit, of
 	if limit <= 0 {
 		limit = 50
 	}
-	where := "WHERE 1=1"
-	args := []any{}
-	if f.AgentID != "" {
-		args = append(args, f.AgentID)
-		where += fmt.Sprintf(" AND agent_id = $%d", len(args))
-	}
-	if f.HandID != "" {
-		args = append(args, f.HandID)
-		where += fmt.Sprintf(" AND ref_type = 'hand' AND ref_id = $%d", len(args))
-	}
-	if f.From != nil {
-		args = append(args, *f.From)
-		where += fmt.Sprintf(" AND created_at >= $%d", len(args))
-	}
-	if f.To != nil {
-		args = append(args, *f.To)
-		where += fmt.Sprintf(" AND created_at <= $%d", len(args))
-	}
-	args = append(args, limit, offset)
-	q := `SELECT id, agent_id, type, amount_cc, ref_type, ref_id, created_at FROM ledger_entries ` + where + ` ORDER BY created_at DESC LIMIT $` + fmt.Sprintf("%d", len(args)-1) + ` OFFSET $` + fmt.Sprintf("%d", len(args))
-	rows, err := s.DB.QueryContext(ctx, q, args...)
+	rows, err := s.q.ListLedgerEntries(ctx, sqlcgen.ListLedgerEntriesParams{
+		Column1: f.AgentID,
+		Column2: f.HandID,
+		Column3: timeParam(f.From),
+		Column4: timeParam(f.To),
+		Limit:   int32(limit),
+		Offset:  int32(offset),
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := []LedgerEntry{}
-	for rows.Next() {
-		var e LedgerEntry
-		if err := rows.Scan(&e.ID, &e.AgentID, &e.Type, &e.AmountCC, &e.RefType, &e.RefID, &e.CreatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, e)
+	out := make([]LedgerEntry, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, LedgerEntry{
+			ID:        r.ID,
+			AgentID:   r.AgentID,
+			Type:      r.Type,
+			AmountCC:  r.AmountCc,
+			RefType:   r.RefType,
+			RefID:     r.RefID,
+			CreatedAt: r.CreatedAt.Time,
+		})
 	}
 	return out, nil
 }
@@ -531,25 +576,65 @@ func (s *Store) ListLeaderboard(ctx context.Context, limit, offset int) ([]Leade
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT a.id, a.name, COALESCE(SUM(l.amount_cc), 0) AS net_cc
-		FROM agents a
-		LEFT JOIN ledger_entries l ON l.agent_id = a.id
-		GROUP BY a.id, a.name
-		ORDER BY net_cc DESC
-		LIMIT $1 OFFSET $2
-	`, limit, offset)
+	rows, err := s.q.ListLeaderboard(ctx, sqlcgen.ListLeaderboardParams{
+		Limit:  int32(limit),
+		Offset: int32(offset),
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := []LeaderboardEntry{}
-	for rows.Next() {
-		var e LeaderboardEntry
-		if err := rows.Scan(&e.AgentID, &e.Name, &e.NetCC); err != nil {
-			return nil, err
-		}
-		out = append(out, e)
+	out := make([]LeaderboardEntry, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, LeaderboardEntry{
+			AgentID: r.ID,
+			Name:    r.Name,
+			NetCC:   anyToInt64(r.NetCc),
+		})
 	}
 	return out, nil
+}
+
+func mapNotFound(err error) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
+}
+
+func textParam(v string) pgtype.Text {
+	if v == "" {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: v, Valid: true}
+}
+
+func int4Param(v int32) pgtype.Int4 {
+	return pgtype.Int4{Int32: v, Valid: true}
+}
+
+func timeParam(v *time.Time) pgtype.Timestamptz {
+	if v == nil {
+		return pgtype.Timestamptz{}
+	}
+	return pgtype.Timestamptz{Time: *v, Valid: true}
+}
+
+func textVal(v pgtype.Text) string {
+	if !v.Valid {
+		return ""
+	}
+	return v.String
+}
+
+func anyToInt64(v any) int64 {
+	switch t := v.(type) {
+	case int64:
+		return t
+	case int32:
+		return int64(t)
+	case float64:
+		return int64(t)
+	default:
+		return 0
+	}
 }

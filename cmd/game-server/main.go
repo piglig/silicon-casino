@@ -5,28 +5,36 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"silicon-casino/internal/config"
 	"silicon-casino/internal/ledger"
 	"silicon-casino/internal/logging"
 	"silicon-casino/internal/store"
 	"silicon-casino/internal/ws"
 
+	"github.com/go-chi/chi/v5"
+	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/zerolog/log"
 )
 
 func main() {
-	logging.Init()
-	dsn := getenv("POSTGRES_DSN", "postgres://localhost:5432/apa?sslmode=disable")
-	addr := getenv("WS_ADDR", ":8080")
+	logCfg, err := config.LoadLog()
+	if err != nil {
+		panic(err)
+	}
+	logging.Init(logCfg)
+	cfg, err := config.LoadServer()
+	if err != nil {
+		log.Fatal().Err(err).Msg("load server config failed")
+	}
 	initial := int64(100000)
 
-	st, err := store.New(dsn)
+	st, err := store.New(cfg.PostgresDSN)
 	if err != nil {
 		log.Fatal().Err(err).Msg("store init failed")
 	}
@@ -35,53 +43,73 @@ func main() {
 	}
 
 	// Optional seed from env
-	seedAgent(st, "AGENT1_NAME", "AGENT1_KEY", initial)
-	seedAgent(st, "AGENT2_NAME", "AGENT2_KEY", initial)
+	seedAgent(st, cfg.Agent1Name, cfg.Agent1Key, initial)
+	seedAgent(st, cfg.Agent2Name, cfg.Agent2Key, initial)
 
 	led := ledger.New(st)
 	if err := st.EnsureDefaultRooms(context.Background()); err != nil {
 		log.Fatal().Err(err).Msg("ensure default rooms failed")
 	}
-	if err := st.EnsureDefaultProviderRates(context.Background(), defaultProviderRates()); err != nil {
+	if err := st.EnsureDefaultProviderRates(context.Background(), defaultProviderRates(cfg)); err != nil {
 		log.Fatal().Err(err).Msg("ensure provider rates failed")
 	}
 	srv := ws.NewServer(st, led)
 
-	h := http.NewServeMux()
-	h.HandleFunc("/ws", srv.HandleWS)
-	h.HandleFunc("/healthz", healthHandler(st))
-	h.HandleFunc("/api/agents", withAdminAuth(agentsHandler(st)))
-	h.HandleFunc("/api/accounts", withAdminAuth(accountsHandler(st)))
-	h.HandleFunc("/api/ledger", withAdminAuth(ledgerHandler(st)))
-	h.HandleFunc("/api/topup", withAdminAuth(topupHandler(st)))
-	h.HandleFunc("/api/leaderboard", withAdminAuth(leaderboardHandler(st)))
-	h.HandleFunc("/api/public/leaderboard", publicLeaderboardHandler(st))
-	h.HandleFunc("/api/rooms", withAdminAuth(roomsHandler(st)))
-	h.HandleFunc("/api/providers/rates", withAdminAuth(providerRatesHandler(st)))
-	h.HandleFunc("/api/public/rooms", publicRoomsHandler(st))
-	h.HandleFunc("/api/public/tables", publicTablesHandler(st))
-	h.HandleFunc("/api/public/agent-table", publicAgentTableHandler(srv))
-	h.HandleFunc("/api/agents/register", registerAgentHandler(st))
-	h.HandleFunc("/api/agents/status", withAgentAuth(st, agentStatusHandler(st)))
-	h.HandleFunc("/api/agents/me", withAgentAuth(st, agentMeHandler(st)))
-	h.HandleFunc("/api/agents/claim", claimAgentHandler(st))
-	h.HandleFunc("/api/agents/bind_key", withAgentAuth(st, bindKeyHandler(st)))
-	staticDir := filepath.Join("internal", "ws", "static")
-	h.Handle("/", http.FileServer(http.Dir(staticDir)))
-	skillServer := http.FileServer(http.Dir(filepath.Join("api", "skill")))
-	h.Handle("/skill.md", skillServer)
-	h.Handle("/heartbeat.md", skillServer)
-	h.Handle("/messaging.md", skillServer)
-	h.Handle("/skill.json", skillServer)
+	r := chi.NewRouter()
+	r.Use(chimw.Recoverer)
+	r.Use(chimw.RealIP)
 
-	server := &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 5 * time.Second}
-	log.Info().Str("addr", addr).Msg("ws listening")
+	r.Get("/healthz", healthHandler(st))
+	r.HandleFunc("/ws", srv.HandleWS)
+
+	r.Route("/api", func(r chi.Router) {
+		r.Get("/public/leaderboard", publicLeaderboardHandler(st))
+		r.Get("/public/rooms", publicRoomsHandler(st))
+		r.Get("/public/tables", publicTablesHandler(st))
+		r.Get("/public/agent-table", publicAgentTableHandler(srv))
+
+		r.Post("/agents/register", registerAgentHandler(st))
+		r.Post("/agents/claim", claimAgentHandler(st))
+
+		r.Group(func(r chi.Router) {
+			r.Use(agentAuthMiddleware(st))
+			r.Get("/agents/status", agentStatusHandler(st))
+			r.Get("/agents/me", agentMeHandler(st))
+			r.Post("/agents/bind_key", bindKeyHandler(st, cfg))
+		})
+
+		r.Group(func(r chi.Router) {
+			r.Use(adminAuthMiddleware(cfg.AdminAPIKey))
+			r.Get("/agents", agentsHandler(st))
+			r.Get("/accounts", accountsHandler(st))
+			r.Get("/ledger", ledgerHandler(st))
+			r.Post("/topup", topupHandler(st))
+			r.Get("/leaderboard", leaderboardHandler(st))
+			r.MethodFunc(http.MethodGet, "/rooms", roomsHandler(st))
+			r.MethodFunc(http.MethodPost, "/rooms", roomsHandler(st))
+			r.MethodFunc(http.MethodGet, "/providers/rates", providerRatesHandler(st))
+			r.MethodFunc(http.MethodPost, "/providers/rates", providerRatesHandler(st))
+		})
+	})
+
+	skillServer := http.FileServer(http.Dir(filepath.Join("api", "skill")))
+	r.Handle("/skill.md", skillServer)
+	r.Handle("/heartbeat.md", skillServer)
+	r.Handle("/messaging.md", skillServer)
+	r.Handle("/skill.json", skillServer)
+
+	localSkillServer := http.StripPrefix("/skill-local/", http.FileServer(http.Dir(filepath.Join("api", "skill-local"))))
+	r.Handle("/skill-local/*", localSkillServer)
+
+	staticDir := filepath.Join("internal", "ws", "static")
+	r.Handle("/*", http.FileServer(http.Dir(staticDir)))
+
+	server := &http.Server{Addr: cfg.WSAddr, Handler: r, ReadHeaderTimeout: 5 * time.Second}
+	log.Info().Str("addr", cfg.WSAddr).Msg("ws listening")
 	log.Fatal().Err(server.ListenAndServe()).Msg("server stopped")
 }
 
-func seedAgent(st *store.Store, nameEnv, keyEnv string, initial int64) {
-	name := os.Getenv(nameEnv)
-	key := os.Getenv(keyEnv)
+func seedAgent(st *store.Store, name, key string, initial int64) {
 	if name == "" || key == "" {
 		return
 	}
@@ -99,36 +127,20 @@ func seedAgent(st *store.Store, nameEnv, keyEnv string, initial int64) {
 	_ = st.EnsureAccount(ctx, id, initial)
 }
 
-func getenv(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
-}
-
-func getenvFloat(key string, def float64) float64 {
-	if v := os.Getenv(key); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			return f
-		}
-	}
-	return def
-}
-
-func defaultProviderRates() []store.ProviderRate {
-	ccPerUSD := getenvFloat("CC_PER_USD", 1000)
+func defaultProviderRates(cfg config.ServerConfig) []store.ProviderRate {
+	ccPerUSD := cfg.CCPerUSD
 	return []store.ProviderRate{
 		{
 			Provider:            "openai",
-			PricePer1KTokensUSD: getenvFloat("OPENAI_PRICE_PER_1K_USD", 0.0001),
+			PricePer1KTokensUSD: cfg.OpenAIPricePer1K,
 			CCPerUSD:            ccPerUSD,
-			Weight:              getenvFloat("OPENAI_WEIGHT", 1.0),
+			Weight:              cfg.OpenAIWeight,
 		},
 		{
 			Provider:            "kimi",
-			PricePer1KTokensUSD: getenvFloat("KIMI_PRICE_PER_1K_USD", 0.0001),
+			PricePer1KTokensUSD: cfg.KimiPricePer1K,
 			CCPerUSD:            ccPerUSD,
-			Weight:              getenvFloat("KIMI_WEIGHT", 1.0),
+			Weight:              cfg.KimiWeight,
 		},
 	}
 }
@@ -491,7 +503,7 @@ func claimAgentHandler(st *store.Store) http.HandlerFunc {
 	}
 }
 
-func bindKeyHandler(st *store.Store) http.HandlerFunc {
+func bindKeyHandler(st *store.Store, cfg config.ServerConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -513,7 +525,7 @@ func bindKeyHandler(st *store.Store) http.HandlerFunc {
 			_ = json.NewEncoder(w).Encode(map[string]any{"error": "invalid_request"})
 			return
 		}
-		if maxBudget := getenvFloat("MAX_BUDGET_USD", 20); body.BudgetUSD > maxBudget {
+		if body.BudgetUSD > cfg.MaxBudgetUSD {
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(map[string]any{"error": "budget_exceeds_limit"})
 			return
@@ -537,7 +549,7 @@ func bindKeyHandler(st *store.Store) http.HandlerFunc {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		} else if last != nil {
-			cooldown := time.Duration(getenvFloat("BIND_KEY_COOLDOWN_MINUTES", 60)) * time.Minute
+			cooldown := time.Duration(cfg.BindCooldownMins) * time.Minute
 			if time.Since(*last) < cooldown {
 				w.WriteHeader(http.StatusTooManyRequests)
 				_ = json.NewEncoder(w).Encode(map[string]any{"error": "cooldown_active"})
@@ -555,7 +567,7 @@ func bindKeyHandler(st *store.Store) http.HandlerFunc {
 			return
 		}
 
-		if err := verifyVendorKey(r.Context(), body.Provider, body.APIKey); err != nil {
+		if err := verifyVendorKey(r.Context(), cfg, body.Provider, body.APIKey); err != nil {
 			_ = st.RecordAgentKeyAttempt(r.Context(), agent.ID, body.Provider, "invalid_key")
 			if n, err := st.CountConsecutiveInvalidKeyAttempts(r.Context(), agent.ID); err == nil && n >= 3 {
 				_ = st.BlacklistAgent(r.Context(), agent.ID, "too_many_invalid_keys")
@@ -604,29 +616,31 @@ func bindKeyHandler(st *store.Store) http.HandlerFunc {
 
 type agentContextKey struct{}
 
-func withAgentAuth(st *store.Store, next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		auth := r.Header.Get("Authorization")
-		prefix := "Bearer "
-		if len(auth) <= len(prefix) || auth[:len(prefix)] != prefix {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		apiKey := auth[len(prefix):]
-		agent, err := st.GetAgentByAPIKey(r.Context(), apiKey)
-		if err != nil {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		ctx := context.WithValue(r.Context(), agentContextKey{}, agent)
-		next(w, r.WithContext(ctx))
+func agentAuthMiddleware(st *store.Store) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			auth := r.Header.Get("Authorization")
+			prefix := "Bearer "
+			if len(auth) <= len(prefix) || auth[:len(prefix)] != prefix {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			apiKey := auth[len(prefix):]
+			agent, err := st.GetAgentByAPIKey(r.Context(), apiKey)
+			if err != nil {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			ctx := context.WithValue(r.Context(), agentContextKey{}, agent)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
 	}
 }
 
-func verifyVendorKey(ctx context.Context, provider, apiKey string) error {
-	base := getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+func verifyVendorKey(ctx context.Context, cfg config.ServerConfig, provider, apiKey string) error {
+	base := cfg.OpenAIBaseURL
 	if provider == "kimi" {
-		base = getenv("KIMI_BASE_URL", "https://api.moonshot.ai/v1")
+		base = cfg.KimiBaseURL
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+"/models", nil)
 	if err != nil {
@@ -687,17 +701,25 @@ func leaderboardHandler(st *store.Store) http.HandlerFunc {
 	}
 }
 
-func withAdminAuth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		adminKey := os.Getenv("ADMIN_API_KEY")
-		if adminKey != "" {
-			if !checkAdminAuth(r, adminKey) {
-				w.WriteHeader(http.StatusUnauthorized)
-				_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "unauthorized"})
-				return
+func adminAuthMiddleware(adminKey string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if adminKey != "" {
+				if !checkAdminAuth(r, adminKey) {
+					w.WriteHeader(http.StatusUnauthorized)
+					_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "unauthorized"})
+					return
+				}
 			}
-		}
-		next(w, r)
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// Backward-compatible wrappers used by legacy tests.
+func withAgentAuth(st *store.Store, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		agentAuthMiddleware(st)(next).ServeHTTP(w, r)
 	}
 }
 

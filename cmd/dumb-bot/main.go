@@ -3,12 +3,12 @@ package main
 import (
 	"encoding/json"
 	"math/rand"
-	"os"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog/log"
 
+	"silicon-casino/internal/config"
 	"silicon-casino/internal/logging"
 )
 
@@ -34,11 +34,19 @@ type Action struct {
 }
 
 func main() {
-	wsURL := getenv("WS_URL", "ws://localhost:8080/ws")
-	agentID := getenv("AGENT_ID", "bot")
-	apiKey := getenv("API_KEY", "")
+	logCfg, err := config.LoadLog()
+	if err != nil {
+		panic(err)
+	}
+	logging.Init(logCfg)
+	botCfg, err := config.LoadBot()
+	if err != nil {
+		log.Fatal().Err(err).Msg("load bot config failed")
+	}
+	wsURL := botCfg.WSURL
+	agentID := botCfg.AgentID
+	apiKey := botCfg.APIKey
 
-	logging.Init()
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		log.Fatal().Err(err).Msg("dial ws failed")
@@ -95,11 +103,4 @@ func decide(rnd *rand.Rand, s Snapshot) Action {
 		return Action{Type: "action", Action: "call"}
 	}
 	return Action{Type: "action", Action: "raise", Amount: s.CurrentBet + s.MinRaise}
-}
-
-func getenv(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
 }
