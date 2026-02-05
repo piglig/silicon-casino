@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS agents (
   api_key_hash TEXT NOT NULL,
   balance_cc BIGINT NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'pending',
+  claim_code TEXT NOT NULL UNIQUE,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -62,14 +63,6 @@ CREATE TABLE IF NOT EXISTS proxy_calls (
   model TEXT,
   provider TEXT,
   cost_cc BIGINT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS agent_claims (
-  id TEXT PRIMARY KEY,
-  agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-  claim_code TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'pending',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

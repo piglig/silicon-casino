@@ -23,7 +23,7 @@ func TestBindKeyHandler_Success(t *testing.T) {
 	}
 
 	apiKey := "apa_key_a"
-	agentID, err := st.CreateAgent(ctx, "AgentA", apiKey)
+	agentID, err := st.CreateAgent(ctx, "AgentA", apiKey, "claim-"+apiKey)
 	if err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestBindKeyHandler_DuplicateKey(t *testing.T) {
 	}
 
 	apiKey1 := "apa_key_a"
-	agentID1, err := st.CreateAgent(ctx, "AgentA", apiKey1)
+	agentID1, err := st.CreateAgent(ctx, "AgentA", apiKey1, "claim-"+apiKey1)
 	if err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestBindKeyHandler_DuplicateKey(t *testing.T) {
 	}
 
 	apiKey2 := "apa_key_b"
-	agentID2, err := st.CreateAgent(ctx, "AgentB", apiKey2)
+	agentID2, err := st.CreateAgent(ctx, "AgentB", apiKey2, "claim-"+apiKey2)
 	if err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestBindKeyHandler_BudgetLimit(t *testing.T) {
 	}
 
 	apiKey := "apa_key_limit"
-	agentID, err := st.CreateAgent(ctx, "AgentLimit", apiKey)
+	agentID, err := st.CreateAgent(ctx, "AgentLimit", apiKey, "claim-"+apiKey)
 	if err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestBindKeyHandler_Cooldown(t *testing.T) {
 	}
 
 	apiKey := "apa_key_cooldown"
-	agentID, err := st.CreateAgent(ctx, "AgentCooldown", apiKey)
+	agentID, err := st.CreateAgent(ctx, "AgentCooldown", apiKey, "claim-"+apiKey)
 	if err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestBindKeyHandler_BlacklistAfterInvalidKeys(t *testing.T) {
 	}
 
 	apiKey := "apa_key_block"
-	agentID, err := st.CreateAgent(ctx, "AgentBlock", apiKey)
+	agentID, err := st.CreateAgent(ctx, "AgentBlock", apiKey, "claim-"+apiKey)
 	if err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
@@ -223,7 +223,7 @@ func TestAgentMeHandler(t *testing.T) {
 
 	ctx := context.Background()
 	apiKey := "apa_key_me"
-	agentID, err := st.CreateAgent(ctx, "AgentMe", apiKey)
+	agentID, err := st.CreateAgent(ctx, "AgentMe", apiKey, "claim-"+apiKey)
 	if err != nil {
 		t.Fatalf("create agent: %v", err)
 	}

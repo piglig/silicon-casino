@@ -55,15 +55,32 @@ function readNumber(args: ArgMap, key: string, fallback?: number): number {
 function printHelp(): void {
   console.log(`apa-bot commands:
   apa-bot register --name <name> --description <desc> [--api-base <url>]
-  apa-bot status --api-key <key> [--api-base <url>]
-  apa-bot me --api-key <key> [--api-base <url>]
-  apa-bot bind-key --api-key <key> --provider <openai|kimi> --vendor-key <key> --budget-usd <num> [--api-base <url>]
+  apa-bot claim (--claim-code <code> | --claim-url <url>) [--api-base <url>]
+  apa-bot me [--api-base <url>]
+  apa-bot bind-key --provider <openai|kimi> --vendor-key <key> --budget-usd <num> [--api-base <url>]
   apa-bot loop --join <random|select> [--room-id <id>]
-               [--provider <openai|kimi>] [--vendor-key <key> | --vendor-key-env <ENV>]
-               [--budget-usd <num>] [--callback-addr <host:port>] [--decision-timeout-ms <ms>] [--api-base <url>]
+               [--callback-addr <host:port>] [--decision-timeout-ms <ms>] [--api-base <url>]
   apa-bot doctor [--api-base <url>]
 
 Config priority: CLI args > env (API_BASE) > defaults.`);
+}
+
+async function requireApiKey(apiBase: string): Promise<string> {
+  const cached = await loadCredential(apiBase, undefined);
+  if (!cached?.api_key) {
+    throw new Error("api_key_not_found (run apa-bot register)");
+  }
+  return cached.api_key;
+}
+
+function claimCodeFromUrl(raw: string): string {
+  try {
+    const url = new URL(raw);
+    const parts = url.pathname.split("/").filter(Boolean);
+    return parts[parts.length - 1] || "";
+  } catch {
+    return "";
+  }
 }
 
 type SseEvent = {
@@ -161,26 +178,12 @@ function pickRoom(
   return { id: sorted[0].id, min_buyin_cc: sorted[0].min_buyin_cc };
 }
 
-function getVendorKey(args: ArgMap): string {
-  const direct = readString(args, "vendor-key");
-  if (direct) {
-    return direct;
-  }
-  const envName = readString(args, "vendor-key-env");
-  if (envName && process.env[envName]) {
-    return process.env[envName] || "";
-  }
-  return "";
-}
-
 async function runLoop(args: ArgMap): Promise<void> {
   const apiBase = resolveApiBase(readString(args, "api-base", "API_BASE"));
   const joinRaw = requireArg("--join", readString(args, "join"));
   const joinMode = joinRaw === "select" ? "select" : "random";
   const roomId = joinMode === "select" ? requireArg("--room-id", readString(args, "room-id")) : undefined;
-  const provider = readString(args, "provider") || "";
-  const budgetUsd = readNumber(args, "budget-usd", 10);
-  const callbackAddr = readString(args, "callback-addr") || "127.0.0.1:8787";
+  const callbackAddr = readString(args, "callback-addr");
   const decisionTimeoutMs = readNumber(args, "decision-timeout-ms", 5000);
 
   const client = new APAHttpClient({ apiBase });
@@ -191,9 +194,9 @@ async function runLoop(args: ArgMap): Promise<void> {
   const agentId = cached.agent_id;
   const apiKey = cached.api_key;
 
-  const status = await client.getAgentStatus(apiKey);
-  emit({ type: "agent_status", status });
-  if (status?.status === "pending") {
+  const meStatus = await client.getAgentMe(apiKey);
+  emit({ type: "agent_status", status: meStatus });
+  if (meStatus?.status === "pending") {
     emit({ type: "claim_required", message: "agent is pending; complete claim before starting loop" });
     return;
   }
@@ -205,21 +208,7 @@ async function runLoop(args: ArgMap): Promise<void> {
   const pickedRoom = pickRoom(rooms.items || [], joinMode, roomId);
 
   if (balance < pickedRoom.min_buyin_cc) {
-    const vendorKey = getVendorKey(args);
-    if (!provider) {
-      throw new Error("provider_required_for_topup");
-    }
-    if (!vendorKey) {
-      throw new Error("vendor_key_required_for_topup");
-    }
-    emit({ type: "topup_start", provider, budget_usd: budgetUsd });
-    await client.bindKey({ apiKey, provider, vendorKey, budgetUsd });
-    me = await client.getAgentMe(apiKey);
-    balance = Number(me?.balance_cc ?? 0);
-  }
-
-  if (balance < pickedRoom.min_buyin_cc) {
-    throw new Error(`insufficient_balance_after_topup (balance=${balance}, min=${pickedRoom.min_buyin_cc})`);
+    throw new Error(`insufficient_balance (balance=${balance}, min=${pickedRoom.min_buyin_cc})`);
   }
 
   const callbackServer = new DecisionCallbackServer(callbackAddr);
@@ -346,23 +335,28 @@ async function run(): Promise<void> {
       console.log(JSON.stringify(result, null, 2));
       return;
     }
-    case "status": {
+    case "claim": {
       const client = new APAHttpClient({ apiBase });
-      const apiKey = requireArg("--api-key", readString(args, "api-key", "APA_API_KEY"));
-      const result = await client.getAgentStatus(apiKey);
+      const claimCode = readString(args, "claim-code");
+      const claimURL = readString(args, "claim-url");
+      const code = claimCode || (claimURL ? claimCodeFromUrl(claimURL) : "");
+      if (!code) {
+        throw new Error("claim_code_required (--claim-code or --claim-url)");
+      }
+      const result = await client.claimByCode(code);
       console.log(JSON.stringify(result, null, 2));
       return;
     }
     case "me": {
       const client = new APAHttpClient({ apiBase });
-      const apiKey = requireArg("--api-key", readString(args, "api-key", "APA_API_KEY"));
+      const apiKey = await requireApiKey(apiBase);
       const result = await client.getAgentMe(apiKey);
       console.log(JSON.stringify(result, null, 2));
       return;
     }
     case "bind-key": {
       const client = new APAHttpClient({ apiBase });
-      const apiKey = requireArg("--api-key", readString(args, "api-key", "APA_API_KEY"));
+      const apiKey = await requireApiKey(apiBase);
       const provider = requireArg("--provider", readString(args, "provider"));
       const vendorKey = requireArg("--vendor-key", readString(args, "vendor-key"));
       const budgetUsd = readNumber(args, "budget-usd");

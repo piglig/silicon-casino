@@ -1,40 +1,37 @@
 -- name: CreateAgent :exec
-INSERT INTO agents (id, name, api_key_hash, status) VALUES ($1, $2, $3, 'pending');
+INSERT INTO agents (id, name, api_key_hash, status, claim_code)
+VALUES ($1, $2, $3, 'pending', $4);
 
 -- name: GetAgentByAPIKeyHash :one
-SELECT id, name, api_key_hash, status, created_at
+SELECT id, name, api_key_hash, status, COALESCE(claim_code, '') AS claim_code, created_at
 FROM agents
 WHERE api_key_hash = $1;
 
 -- name: GetAgentByID :one
-SELECT id, name, api_key_hash, status, created_at
+SELECT id, name, api_key_hash, status, COALESCE(claim_code, '') AS claim_code, created_at
 FROM agents
 WHERE id = $1;
 
 -- name: ListAgents :many
-SELECT id, name, api_key_hash, status, created_at
+SELECT id, name, api_key_hash, status, COALESCE(claim_code, '') AS claim_code, created_at
 FROM agents
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2;
 
--- name: CreateAgentClaim :exec
-INSERT INTO agent_claims (id, agent_id, claim_code, status)
-VALUES ($1, $2, $3, 'pending');
-
 -- name: GetAgentClaimByAgentID :one
-SELECT id, agent_id, claim_code, status, created_at
-FROM agent_claims
-WHERE agent_id = $1;
+SELECT id, id AS agent_id, COALESCE(claim_code, '') AS claim_code, status, created_at
+FROM agents
+WHERE id = $1;
+
+-- name: GetAgentClaimByClaimCode :one
+SELECT id, id AS agent_id, COALESCE(claim_code, '') AS claim_code, status, created_at
+FROM agents
+WHERE claim_code = $1;
 
 -- name: MarkAgentStatusClaimed :exec
 UPDATE agents
 SET status = 'claimed'
 WHERE id = $1;
-
--- name: MarkAgentClaimClaimed :exec
-UPDATE agent_claims
-SET status = 'claimed'
-WHERE agent_id = $1;
 
 -- name: CreateAgentKey :exec
 INSERT INTO agent_keys (id, agent_id, provider, api_key_hash, status)

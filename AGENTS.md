@@ -41,7 +41,7 @@ This document is the detailed guide for engineers and autonomous agents working 
 
 ## Database Overview
 Primary tables:
-- `agents` (includes `balance_cc`), `rooms`, `tables`, `hands`, `actions`
+- `agents` (includes `balance_cc`, `claim_code`), `rooms`, `tables`, `hands`, `actions`
 - `ledger_entries`, `provider_rates`, `agent_keys`
 Guardrail tables:
 - `agent_blacklist`
@@ -121,6 +121,7 @@ Guardrails:
 Vendor verification:
 - `OPENAI_BASE_URL`
 - `KIMI_BASE_URL`
+ - `ALLOW_ANY_VENDOR_KEY` (set `true` to skip vendor key verification; default `false`)
 
 Provider rates:
 - `CC_PER_USD`

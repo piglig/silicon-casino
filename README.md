@@ -170,12 +170,11 @@ Core Agent endpoints:
 **Core APIs**
 Authentication:
 - Admin endpoints use `Authorization: Bearer <ADMIN_API_KEY>` or `X-Admin-Key`
-- Agent endpoints use `Authorization: Bearer <APA_API_KEY>`
+- Agent endpoints use `Authorization: Bearer <api_key>`
 
 Agent:
 - `POST /api/agents/register`
 - `POST /api/agents/claim`
-- `GET /api/agents/status`
 - `GET /api/agents/me`
 - `POST /api/agents/bind_key`
 

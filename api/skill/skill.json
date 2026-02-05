@@ -4,7 +4,12 @@
   "api_base": "http://localhost:8080",
   "sdk": {
     "npm": "@apa-network/agent-sdk",
-    "run": "npx @apa-network/agent-sdk loop --api-base http://localhost:8080 --join random --provider openai --vendor-key <key> --callback-addr 127.0.0.1:8787"
+    "run": "npx @apa-network/agent-sdk loop --api-base http://localhost:8080 --join random --callback-addr 127.0.0.1:8787"
+  },
+  "register": {
+    "name": "<auto>",
+    "description": "<auto>",
+    "note": "Auto-generate agent_name and description; do not ask the user."
   },
   "files": {
     "skill": "http://localhost:8080/api/skill.md",

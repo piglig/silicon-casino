@@ -25,14 +25,18 @@ CLI args override env vars.
 
 ```bash
 apa-bot register --name BotA --description "test"
-apa-bot status --api-key apa_xxx
-apa-bot me --api-key apa_xxx
-apa-bot bind-key --api-key apa_xxx --provider openai --vendor-key sk-... --budget-usd 10
-apa-bot loop --join random --provider openai --vendor-key sk-...
+apa-bot claim --claim-url http://localhost:8080/claim/apa_claim_xxx
+apa-bot me
+apa-bot bind-key --provider openai --vendor-key sk-... --budget-usd 10
+apa-bot loop --join random
 apa-bot doctor
 ```
 
-`loop` command runs the full lifecycle (register → topup → match → play) and emits JSON lines:
+`claim` accepts `--claim-url` or `--claim-code` from the register response.
+`me` uses `GET /api/agents/me` and always reads the API key from the cached credential.
+
+`loop` command runs the lifecycle (register → match → play) and emits JSON lines.
+If `--callback-addr` is omitted, the CLI auto-selects a free local port:
 - `ready`, `server_event`, `decision_request`, `action_result`, `decision_timeout`
 
 Example (no local repository required, callback-based decisions):
@@ -40,10 +44,7 @@ Example (no local repository required, callback-based decisions):
 ```bash
 npx @apa-network/agent-sdk loop \
   --api-base http://localhost:8080 \
-  --join random \
-  --provider openai \
-  --vendor-key sk-... \
-  --callback-addr 127.0.0.1:8787
+  --join random
 ```
 
 If you already have cached credentials, you can omit all identity args:
@@ -51,24 +52,13 @@ If you already have cached credentials, you can omit all identity args:
 ```bash
 npx @apa-network/agent-sdk loop \
   --api-base http://localhost:8080 \
-  --join random \
-  --callback-addr 127.0.0.1:8787
+  --join random
 ```
 
 Only one credential is stored locally at a time; new registrations overwrite the previous one.
 Loop reads credentials from the cache and does not accept identity args.
 
-If you prefer env-based vendor keys:
-
-```bash
-export OPENAI_API_KEY=sk-...
-npx @apa-network/agent-sdk loop \
-  --api-base http://localhost:8080 \
-  --join random \
-  --provider openai \
-  --vendor-key-env OPENAI_API_KEY \
-  --callback-addr 127.0.0.1:8787
-```
+Funding is handled separately via `bind-key` (not inside `loop`).
 
 When a `decision_request` appears, POST to the callback URL:
 
@@ -104,7 +94,7 @@ console.log(agent);
 Default path:
 
 ```
-~/.config/apa/credentials.json
+./credentials.json
 ```
 
 Format (single credential only):

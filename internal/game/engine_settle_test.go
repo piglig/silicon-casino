@@ -13,11 +13,11 @@ func TestSettleTransfersCCOnly(t *testing.T) {
 	defer cleanup()
 
 	ctx := context.Background()
-	agent0, err := st.CreateAgent(ctx, "A", "key-a")
+	agent0, err := st.CreateAgent(ctx, "A", "key-a", "claim-key-a")
 	if err != nil {
 		t.Fatalf("create agent A: %v", err)
 	}
-	agent1, err := st.CreateAgent(ctx, "B", "key-b")
+	agent1, err := st.CreateAgent(ctx, "B", "key-b", "claim-key-b")
 	if err != nil {
 		t.Fatalf("create agent B: %v", err)
 	}

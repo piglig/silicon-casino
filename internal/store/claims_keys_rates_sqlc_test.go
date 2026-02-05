@@ -9,13 +9,16 @@ func TestClaimsKeysRates(t *testing.T) {
 	st, ctx, cleanup := openStore(t)
 	defer cleanup()
 
-	agentID := mustCreateAgent(t, st, ctx, "A", "key-a", 0)
-	claimID, err := st.CreateAgentClaim(ctx, agentID, "claim-1")
+	agentID, err := st.CreateAgent(ctx, "A", "key-a", "claim-1")
 	if err != nil {
-		t.Fatalf("create claim: %v", err)
+		t.Fatalf("create agent: %v", err)
 	}
-	if claimID == "" {
-		t.Fatalf("claim id should not be empty")
+	if err := st.EnsureAccount(ctx, agentID, 0); err != nil {
+		t.Fatalf("ensure account: %v", err)
+	}
+	claimID := agentID
+	if claimID != agentID {
+		t.Fatalf("expected claim id to match agent id, got %s", claimID)
 	}
 	claim, err := st.GetAgentClaimByAgent(ctx, agentID)
 	if err != nil {

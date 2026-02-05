@@ -8,12 +8,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type Account struct {
-	AgentID   string
-	BalanceCc int64
-	UpdatedAt pgtype.Timestamptz
-}
-
 type Action struct {
 	ID         string
 	HandID     string
@@ -27,7 +21,10 @@ type Agent struct {
 	ID         string
 	Name       string
 	ApiKeyHash string
+	BalanceCc  int64
 	Status     string
+	ClaimCode  string
+	UpdatedAt  pgtype.Timestamptz
 	CreatedAt  pgtype.Timestamptz
 }
 
@@ -47,14 +44,6 @@ type AgentActionRequest struct {
 type AgentBlacklist struct {
 	AgentID   string
 	Reason    string
-	CreatedAt pgtype.Timestamptz
-}
-
-type AgentClaim struct {
-	ID        string
-	AgentID   string
-	ClaimCode string
-	Status    string
 	CreatedAt pgtype.Timestamptz
 }
 

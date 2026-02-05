@@ -18,6 +18,9 @@ func TestLoadServerDefaults(t *testing.T) {
 	if cfg.BindCooldownMins != 60 {
 		t.Fatalf("BindCooldownMins = %d, want 60", cfg.BindCooldownMins)
 	}
+	if cfg.AllowAnyVendorKey {
+		t.Fatal("AllowAnyVendorKey = true, want false")
+	}
 }
 
 func TestLoadServerRequiresPostgresDSN(t *testing.T) {
@@ -35,6 +38,7 @@ func TestLoadServerParseTypes(t *testing.T) {
 	t.Setenv("OPENAI_WEIGHT", "1.25")
 	t.Setenv("LOG_PRETTY", "1")
 	t.Setenv("BIND_KEY_COOLDOWN_MINUTES", "30")
+	t.Setenv("ALLOW_ANY_VENDOR_KEY", "true")
 
 	cfg, err := LoadServer()
 	if err != nil {
@@ -48,5 +52,8 @@ func TestLoadServerParseTypes(t *testing.T) {
 	}
 	if cfg.BindCooldownMins != 30 {
 		t.Fatalf("BindCooldownMins = %d, want 30", cfg.BindCooldownMins)
+	}
+	if !cfg.AllowAnyVendorKey {
+		t.Fatal("AllowAnyVendorKey = false, want true")
 	}
 }

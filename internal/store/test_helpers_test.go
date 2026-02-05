@@ -112,7 +112,7 @@ func schemaDDL(format, schema string) (string, error) {
 
 func mustCreateAgent(t *testing.T, st *Store, ctx context.Context, name, apiKey string, initial int64) string {
 	t.Helper()
-	id, err := st.CreateAgent(ctx, name, apiKey)
+	id, err := st.CreateAgent(ctx, name, apiKey, "claim-"+apiKey)
 	if err != nil {
 		t.Fatalf("create agent: %v", err)
 	}

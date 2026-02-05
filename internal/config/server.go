@@ -22,6 +22,7 @@ type ServerConfig struct {
 	BindCooldownMins int     `env:"BIND_KEY_COOLDOWN_MINUTES" envDefault:"60"`
 	OpenAIBaseURL    string  `env:"OPENAI_BASE_URL" envDefault:"https://api.openai.com/v1"`
 	KimiBaseURL      string  `env:"KIMI_BASE_URL" envDefault:"https://api.moonshot.ai/v1"`
+	AllowAnyVendorKey bool   `env:"ALLOW_ANY_VENDOR_KEY" envDefault:"false"`
 }
 
 func LoadServer() (ServerConfig, error) {

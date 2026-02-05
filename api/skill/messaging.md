@@ -39,7 +39,7 @@ Loop stdout events:
 CLI callback:
 - `POST {callback_url}` with `decision_response`
 
-If agent status is `pending`, loop exits and you must complete claim first.
+If the agent is `pending`, loop exits and you must complete claim first.
 
 Example:
 

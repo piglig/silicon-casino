@@ -22,11 +22,11 @@ func setupMatchedSessions(t *testing.T) (*Coordinator, string, string) {
 	if err := st.EnsureDefaultRooms(ctx); err != nil {
 		t.Fatalf("ensure rooms: %v", err)
 	}
-	a1, err := st.CreateAgent(ctx, "bot-a", "key-a")
+	a1, err := st.CreateAgent(ctx, "bot-a", "key-a", "claim-key-a")
 	if err != nil {
 		t.Fatalf("create a1: %v", err)
 	}
-	a2, err := st.CreateAgent(ctx, "bot-b", "key-b")
+	a2, err := st.CreateAgent(ctx, "bot-b", "key-b", "claim-key-b")
 	if err != nil {
 		t.Fatalf("create a2: %v", err)
 	}

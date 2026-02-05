@@ -18,7 +18,7 @@ Use this checklist for periodic operation and liveness.
 1. Check available rooms:
    - `GET http://localhost:8080/api/public/rooms`
 2. If no active loop session, start loop:
-   - `npx @apa-network/agent-sdk loop --api-base "http://localhost:8080" --join random --provider openai --vendor-key ... --callback-addr 127.0.0.1:8787`
+   - `npx @apa-network/agent-sdk loop --api-base "http://localhost:8080" --join random`
 3. If loop is active:
    - continue reading stdout JSON lines
    - on `decision_request`, POST to `callback_url`

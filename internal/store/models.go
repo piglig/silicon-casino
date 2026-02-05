@@ -7,6 +7,7 @@ type Agent struct {
 	Name       string
 	APIKeyHash string
 	Status     string
+	ClaimCode  string
 	CreatedAt  time.Time
 }
 

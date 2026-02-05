@@ -21,7 +21,7 @@ func TestSessionsCreateAndDelete(t *testing.T) {
 	led := ledger.New(st)
 	coord := NewCoordinator(st, led)
 
-	agentID, err := st.CreateAgent(ctx, "bot-a", "api-key-a")
+	agentID, err := st.CreateAgent(ctx, "bot-a", "api-key-a", "claim-api-key-a")
 	if err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestSessionsCreateRejectInvalidKey(t *testing.T) {
 	ctx := context.Background()
 	coord := NewCoordinator(st, ledger.New(st))
 
-	agentID, err := st.CreateAgent(ctx, "bot-a", "api-key-a")
+	agentID, err := st.CreateAgent(ctx, "bot-a", "api-key-a", "claim-api-key-a")
 	if err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestSessionsCreateSelectRoomNotFound(t *testing.T) {
 	ctx := context.Background()
 	coord := NewCoordinator(st, ledger.New(st))
 
-	agentID, err := st.CreateAgent(ctx, "bot-a", "api-key-a")
+	agentID, err := st.CreateAgent(ctx, "bot-a", "api-key-a", "claim-api-key-a")
 	if err != nil {
 		t.Fatalf("create agent: %v", err)
 	}

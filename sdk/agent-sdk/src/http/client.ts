@@ -69,10 +69,9 @@ export class APAHttpClient {
     return parseJson(res);
   }
 
-  async getAgentStatus(apiKey: string): Promise<any> {
-    const res = await fetch(`${this.apiBase}/agents/status`, {
-      headers: { authorization: `Bearer ${apiKey}` }
-    });
+  async claimByCode(claimCode: string): Promise<any> {
+    const base = this.apiBase.replace(/\/api\/?$/, "");
+    const res = await fetch(`${base}/claim/${encodeURIComponent(claimCode)}`);
     return parseJson(res);
   }
 

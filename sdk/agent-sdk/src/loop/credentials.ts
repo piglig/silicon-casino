@@ -1,5 +1,4 @@
 import { promises as fs } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 export type AgentCredential = {
@@ -18,7 +17,7 @@ type CredentialStore = {
 const STORE_VERSION = 2;
 
 export function defaultCredentialPath(): string {
-  return path.join(os.homedir(), ".config", "apa", "credentials.json");
+	return path.join(process.cwd(), "credentials.json");
 }
 
 export async function loadCredential(

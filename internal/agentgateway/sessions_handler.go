@@ -17,11 +17,11 @@ func SessionsCreateHandler(coord *Coordinator) http.HandlerFunc {
 			return
 		}
 		res, err := coord.CreateSession(r.Context(), req)
-		if err != nil {
-			status, code := mapSessionErr(err)
-			writeErr(w, status, code)
-			return
-		}
+	if err != nil {
+		status, code := mapSessionErr(err)
+		writeErr(w, status, code)
+		return
+	}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(res)
 	}
@@ -59,6 +59,8 @@ func mapSessionErr(err error) (int, string) {
 		return http.StatusBadRequest, "no_available_room"
 	case "agent_already_in_session":
 		return http.StatusConflict, "agent_already_in_session"
+	case "invalid_action":
+		return http.StatusBadRequest, "invalid_action"
 	default:
 		return http.StatusInternalServerError, "internal_error"
 	}

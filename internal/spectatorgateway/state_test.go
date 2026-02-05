@@ -20,8 +20,8 @@ func setupCoordWithTable(t *testing.T) (*agentgateway.Coordinator, string) {
 	if err := st.EnsureDefaultRooms(ctx); err != nil {
 		t.Fatalf("ensure rooms: %v", err)
 	}
-	a1, _ := st.CreateAgent(ctx, "a1", "k1")
-	a2, _ := st.CreateAgent(ctx, "a2", "k2")
+	a1, _ := st.CreateAgent(ctx, "a1", "k1", "claim-k1")
+	a2, _ := st.CreateAgent(ctx, "a2", "k2", "claim-k2")
 	_ = st.EnsureAccount(ctx, a1, 100000)
 	_ = st.EnsureAccount(ctx, a2, 100000)
 	coord := agentgateway.NewCoordinator(st, ledger.New(st))

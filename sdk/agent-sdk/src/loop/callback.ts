@@ -1,4 +1,5 @@
 import http from "node:http";
+import type { AddressInfo } from "node:net";
 import { URL } from "node:url";
 
 export type DecisionAction = "fold" | "check" | "call" | "raise" | "bet";
@@ -17,12 +18,12 @@ type DecisionResolver = {
 };
 
 export class DecisionCallbackServer {
-  private readonly addr: string;
+  private readonly addr: string | undefined;
   private readonly decisions = new Map<string, DecisionResolver>();
   private server: http.Server | null = null;
   private callbackURL = "";
 
-  constructor(addr: string) {
+  constructor(addr?: string) {
     this.addr = addr;
   }
 
@@ -30,17 +31,17 @@ export class DecisionCallbackServer {
     if (this.server) {
       return this.callbackURL;
     }
-    const [host, portRaw] = this.addr.split(":");
-    const port = Number(portRaw);
-    if (!host || !Number.isFinite(port) || port <= 0) {
-      throw new Error(`invalid callback addr: ${this.addr}`);
-    }
+    const [host, port] = this.parseAddr();
     this.server = http.createServer(this.handleRequest.bind(this));
     await new Promise<void>((resolve, reject) => {
       this.server?.once("error", reject);
       this.server?.listen(port, host, () => resolve());
     });
-    this.callbackURL = `http://${host}:${port}/decision`;
+    const actual = this.server?.address();
+    if (!actual || typeof actual === "string") {
+      throw new Error("callback_server_address_unavailable");
+    }
+    this.callbackURL = `http://${actual.address}:${actual.port}/decision`;
     return this.callbackURL;
   }
 
@@ -111,5 +112,17 @@ export class DecisionCallbackServer {
     res.statusCode = status;
     res.setHeader("content-type", "application/json");
     res.end(`${JSON.stringify(payload)}\n`);
+  }
+
+  private parseAddr(): [string, number] {
+    if (!this.addr) {
+      return ["127.0.0.1", 0];
+    }
+    const [host, portRaw] = this.addr.split(":");
+    const port = Number(portRaw);
+    if (!host || !Number.isFinite(port) || port <= 0) {
+      throw new Error(`invalid callback addr: ${this.addr}`);
+    }
+    return [host, port];
   }
 }

@@ -52,6 +52,7 @@ func (s *Store) GetAgentByAPIKey(ctx context.Context, apiKey string) (*Agent, er
 		Name:       row.Name,
 		APIKeyHash: row.ApiKeyHash,
 		Status:     row.Status,
+		ClaimCode:  row.ClaimCode,
 		CreatedAt:  row.CreatedAt.Time,
 	}, nil
 }
@@ -158,7 +159,7 @@ func (s *Store) Debit(ctx context.Context, agentID string, amount int64, entryTy
 	newBal := bal - amount
 	if err := qtx.UpdateAccountBalance(ctx, sqlcgen.UpdateAccountBalanceParams{
 		BalanceCc: newBal,
-		AgentID:   agentID,
+		ID:        agentID,
 	}); err != nil {
 		return 0, err
 	}
@@ -196,7 +197,7 @@ func (s *Store) Credit(ctx context.Context, agentID string, amount int64, entryT
 	newBal := bal + amount
 	if err := qtx.UpdateAccountBalance(ctx, sqlcgen.UpdateAccountBalanceParams{
 		BalanceCc: newBal,
-		AgentID:   agentID,
+		ID:        agentID,
 	}); err != nil {
 		return 0, err
 	}
@@ -218,18 +219,19 @@ func (s *Store) Credit(ctx context.Context, agentID string, amount int64, entryT
 
 func (s *Store) EnsureAccount(ctx context.Context, agentID string, initial int64) error {
 	return s.q.EnsureAccount(ctx, sqlcgen.EnsureAccountParams{
-		AgentID:   agentID,
+		ID:        agentID,
 		BalanceCc: initial,
 	})
 }
 
-func (s *Store) CreateAgent(ctx context.Context, name, apiKey string) (string, error) {
+func (s *Store) CreateAgent(ctx context.Context, name, apiKey, claimCode string) (string, error) {
 	id := NewID()
 	hash := HashAPIKey(apiKey)
 	err := s.q.CreateAgent(ctx, sqlcgen.CreateAgentParams{
 		ID:         id,
 		Name:       name,
 		ApiKeyHash: hash,
+		ClaimCode:  claimCode,
 	})
 	return id, err
 }
@@ -336,20 +338,11 @@ func (s *Store) ListAgents(ctx context.Context, limit, offset int) ([]Agent, err
 			Name:       r.Name,
 			APIKeyHash: r.ApiKeyHash,
 			Status:     r.Status,
+			ClaimCode:  r.ClaimCode,
 			CreatedAt:  r.CreatedAt.Time,
 		})
 	}
 	return out, nil
-}
-
-func (s *Store) CreateAgentClaim(ctx context.Context, agentID, claimCode string) (string, error) {
-	id := NewID()
-	err := s.q.CreateAgentClaim(ctx, sqlcgen.CreateAgentClaimParams{
-		ID:        id,
-		AgentID:   agentID,
-		ClaimCode: claimCode,
-	})
-	return id, err
 }
 
 func (s *Store) GetAgentClaimByAgent(ctx context.Context, agentID string) (*AgentClaim, error) {
@@ -366,20 +359,22 @@ func (s *Store) GetAgentClaimByAgent(ctx context.Context, agentID string) (*Agen
 	}, nil
 }
 
-func (s *Store) MarkAgentClaimed(ctx context.Context, agentID string) error {
-	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
+func (s *Store) GetAgentClaimByCode(ctx context.Context, claimCode string) (*AgentClaim, error) {
+	r, err := s.q.GetAgentClaimByClaimCode(ctx, claimCode)
 	if err != nil {
-		return err
+		return nil, mapNotFound(err)
 	}
-	defer tx.Rollback(ctx)
-	qtx := s.q.WithTx(tx)
-	if err := qtx.MarkAgentStatusClaimed(ctx, agentID); err != nil {
-		return err
-	}
-	if err := qtx.MarkAgentClaimClaimed(ctx, agentID); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	return &AgentClaim{
+		ID:        r.ID,
+		AgentID:   r.AgentID,
+		ClaimCode: r.ClaimCode,
+		Status:    r.Status,
+		CreatedAt: r.CreatedAt.Time,
+	}, nil
+}
+
+func (s *Store) MarkAgentClaimed(ctx context.Context, agentID string) error {
+	return s.q.MarkAgentStatusClaimed(ctx, agentID)
 }
 
 func (s *Store) CreateAgentKey(ctx context.Context, agentID, provider, apiKeyHash string) (string, error) {

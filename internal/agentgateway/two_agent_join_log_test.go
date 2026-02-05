@@ -24,11 +24,11 @@ func TestTwoAgentsJoinRoomAndEmitExpectedEvents(t *testing.T) {
 	if err := st.EnsureDefaultRooms(ctx); err != nil {
 		t.Fatalf("ensure default rooms: %v", err)
 	}
-	a1, err := st.CreateAgent(ctx, "join-bot-a", "join-key-a")
+	a1, err := st.CreateAgent(ctx, "join-bot-a", "join-key-a", "claim-join-key-a")
 	if err != nil {
 		t.Fatalf("create agent a1: %v", err)
 	}
-	a2, err := st.CreateAgent(ctx, "join-bot-b", "join-key-b")
+	a2, err := st.CreateAgent(ctx, "join-bot-b", "join-key-b", "claim-join-key-b")
 	if err != nil {
 		t.Fatalf("create agent a2: %v", err)
 	}

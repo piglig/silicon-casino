@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -20,6 +22,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/httplog/v3"
 	"github.com/rs/zerolog/log"
 )
 
@@ -66,13 +69,13 @@ func main() {
 func newRouter(st *store.Store, cfg config.ServerConfig, agentCoord *agentgateway.Coordinator) *chi.Mux {
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
-	r.Use(requestLogMiddleware)
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.RealIP)
 
-	r.Get("/healthz", healthHandler(st))
+	r.With(apiLogMiddleware()).Get("/healthz", healthHandler(st))
 
 	r.Route("/api", func(r chi.Router) {
+		r.Use(apiLogMiddleware())
 		r.Get("/public/leaderboard", publicLeaderboardHandler(st))
 		r.Get("/public/rooms", publicRoomsHandler(st))
 		r.Get("/public/tables", publicTablesHandler(st))
@@ -90,7 +93,6 @@ func newRouter(st *store.Store, cfg config.ServerConfig, agentCoord *agentgatewa
 
 		r.Group(func(r chi.Router) {
 			r.Use(agentAuthMiddleware(st))
-			r.Get("/agents/status", agentStatusHandler(st))
 			r.Get("/agents/me", agentMeHandler(st))
 			r.Post("/agents/bind_key", bindKeyHandler(st, cfg))
 		})
@@ -112,78 +114,38 @@ func newRouter(st *store.Store, cfg config.ServerConfig, agentCoord *agentgatewa
 	r.Handle("/api/messaging.md", skillServer)
 	r.Handle("/api/skill.json", skillServer)
 
+	r.With(apiLogMiddleware()).Get("/claim/{claim_code}", claimByCodeHandler(st))
+
 	staticDir := filepath.Join("internal", "web", "static")
 	r.Handle("/*", http.FileServer(http.Dir(staticDir)))
 	return r
 }
 
-func requestLogMiddleware(next http.Handler) http.Handler {
-	return chimw.RequestLogger(&apiLogFormatter{})(next)
-}
-
-type apiLogFormatter struct{}
-
-func (f *apiLogFormatter) NewLogEntry(r *http.Request) chimw.LogEntry {
-	return &apiLogEntry{
-		r: r,
-	}
-}
-
-type apiLogEntry struct {
-	r *http.Request
-}
-
-func (e *apiLogEntry) Write(status, bytes int, _ http.Header, elapsed time.Duration, _ interface{}) {
-	routePattern := ""
-	if rc := chi.RouteContext(e.r.Context()); rc != nil {
-		routePattern = rc.RoutePattern()
-	}
-	if routePattern == "" {
-		routePattern = e.r.URL.Path
-	}
-	if routePattern == "/healthz" && status < 500 {
-		return
-	}
-
-	evt := log.Info()
-	if status >= 500 {
-		evt = log.Error()
-	} else if status >= 400 {
-		evt = log.Warn()
-	} else if elapsed >= 500*time.Millisecond {
-		evt = log.Warn()
-	}
-
-	evt.
-		Str("request_id", chimw.GetReqID(e.r.Context())).
-		Str("remote_ip", e.r.RemoteAddr).
-		Str("user_agent", e.r.UserAgent()).
-		Str("method", e.r.Method).
-		Str("path", e.r.URL.Path).
-		Str("route", routePattern).
-		Str("query", e.r.URL.RawQuery).
-		Int("status", status).
-		Int("bytes", bytes).
-		Int64("duration_ms", elapsed.Milliseconds()).
-		Msg("http request")
-}
-
-func (e *apiLogEntry) Panic(v interface{}, stack []byte) {
-	routePattern := ""
-	if rc := chi.RouteContext(e.r.Context()); rc != nil {
-		routePattern = rc.RoutePattern()
-	}
-	if routePattern == "" {
-		routePattern = e.r.URL.Path
-	}
-	log.Error().
-		Str("request_id", chimw.GetReqID(e.r.Context())).
-		Str("method", e.r.Method).
-		Str("path", e.r.URL.Path).
-		Str("route", routePattern).
-		Any("panic", v).
-		Bytes("stack", stack).
-		Msg("http panic")
+func apiLogMiddleware() func(http.Handler) http.Handler {
+	return httplog.RequestLogger(
+		slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{})),
+		&httplog.Options{
+			Level:           slog.LevelInfo,
+			Schema:          httplog.Schema{RequestBody: "request_body", ResponseBody: "response_body"},
+			LogRequestBody:  func(*http.Request) bool { return true },
+			LogResponseBody: func(*http.Request) bool { return true },
+			LogRequestHeaders: []string{},
+			LogResponseHeaders: []string{},
+			LogExtraAttrs: func(req *http.Request, _ string, _ int) []slog.Attr {
+				rc := chi.RouteContext(req.Context())
+				route := req.URL.Path
+				if rc != nil && rc.RoutePattern() != "" {
+					route = rc.RoutePattern()
+				}
+				return []slog.Attr{
+					slog.String("request_id", chimw.GetReqID(req.Context())),
+					slog.String("method", req.Method),
+					slog.String("route", route),
+					slog.String("path", req.URL.Path),
+				}
+			},
+		},
+	)
 }
 
 func logRoutes(r chi.Router) {
@@ -223,7 +185,7 @@ func seedAgent(st *store.Store, name, key string, initial int64) {
 	if err == nil && agent != nil {
 		return
 	}
-	id, err := st.CreateAgent(ctx, name, key)
+	id, err := st.CreateAgent(ctx, name, key, "claim_"+key)
 	if err != nil {
 		log.Error().Err(err).Msg("seed agent error")
 		return
@@ -521,13 +483,9 @@ func registerAgentHandler(st *store.Store) http.HandlerFunc {
 			return
 		}
 		apiKey := "apa_" + strconv.FormatInt(time.Now().UnixNano(), 10)
-		id, err := st.CreateAgent(r.Context(), body.Name, apiKey)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
 		claimCode := "apa_claim_" + strconv.FormatInt(time.Now().UnixNano(), 10)
-		if _, err := st.CreateAgentClaim(r.Context(), id, claimCode); err != nil {
+		id, err := st.CreateAgent(r.Context(), body.Name, apiKey, claimCode)
+		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -542,13 +500,6 @@ func registerAgentHandler(st *store.Store) http.HandlerFunc {
 				"verification_code": claimCode,
 			},
 		})
-	}
-}
-
-func agentStatusHandler(st *store.Store) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		agent := r.Context().Value(agentContextKey{}).(*store.Agent)
-		_ = json.NewEncoder(w).Encode(map[string]any{"status": agent.Status})
 	}
 }
 
@@ -594,6 +545,33 @@ func claimAgentHandler(st *store.Store) http.HandlerFunc {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}
+}
+
+func claimByCodeHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claimCode := chi.URLParam(r, "claim_code")
+		if claimCode == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		claim, err := st.GetAgentClaimByCode(r.Context(), claimCode)
+		if err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if claim.Status != "claimed" {
+			if err := st.MarkAgentClaimed(r.Context(), claim.AgentID); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			claim.Status = "claimed"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":       true,
+			"agent_id": claim.AgentID,
+			"status":   claim.Status,
+		})
 	}
 }
 
@@ -661,17 +639,19 @@ func bindKeyHandler(st *store.Store, cfg config.ServerConfig) http.HandlerFunc {
 			return
 		}
 
-		if err := verifyVendorKey(r.Context(), cfg, body.Provider, body.APIKey); err != nil {
-			_ = st.RecordAgentKeyAttempt(r.Context(), agent.ID, body.Provider, "invalid_key")
-			if n, err := st.CountConsecutiveInvalidKeyAttempts(r.Context(), agent.ID); err == nil && n >= 3 {
-				_ = st.BlacklistAgent(r.Context(), agent.ID, "too_many_invalid_keys")
-				w.WriteHeader(http.StatusForbidden)
-				_ = json.NewEncoder(w).Encode(map[string]any{"error": "agent_blacklisted"})
+		if !cfg.AllowAnyVendorKey {
+			if err := verifyVendorKey(r.Context(), cfg, body.Provider, body.APIKey); err != nil {
+				_ = st.RecordAgentKeyAttempt(r.Context(), agent.ID, body.Provider, "invalid_key")
+				if n, err := st.CountConsecutiveInvalidKeyAttempts(r.Context(), agent.ID); err == nil && n >= 3 {
+					_ = st.BlacklistAgent(r.Context(), agent.ID, "too_many_invalid_keys")
+					w.WriteHeader(http.StatusForbidden)
+					_ = json.NewEncoder(w).Encode(map[string]any{"error": "agent_blacklisted"})
+					return
+				}
+				w.WriteHeader(http.StatusUnauthorized)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": "invalid_vendor_key"})
 				return
 			}
-			w.WriteHeader(http.StatusUnauthorized)
-			_ = json.NewEncoder(w).Encode(map[string]any{"error": "invalid_vendor_key"})
-			return
 		}
 
 		rate, err := st.GetProviderRate(r.Context(), body.Provider)
