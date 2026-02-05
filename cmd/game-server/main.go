@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -76,6 +78,7 @@ func newRouter(st *store.Store, cfg config.ServerConfig, agentCoord *agentgatewa
 
 	r.Route("/api", func(r chi.Router) {
 		r.Use(apiLogMiddleware())
+		r.Use(bodyCaptureMiddleware())
 		r.Get("/public/leaderboard", publicLeaderboardHandler(st))
 		r.Get("/public/rooms", publicRoomsHandler(st))
 		r.Get("/public/tables", publicTablesHandler(st))
@@ -114,7 +117,7 @@ func newRouter(st *store.Store, cfg config.ServerConfig, agentCoord *agentgatewa
 	r.Handle("/api/messaging.md", skillServer)
 	r.Handle("/api/skill.json", skillServer)
 
-	r.With(apiLogMiddleware()).Get("/claim/{claim_code}", claimByCodeHandler(st))
+	r.With(apiLogMiddleware(), bodyCaptureMiddleware()).Get("/claim/{claim_code}", claimByCodeHandler(st))
 
 	staticDir := filepath.Join("internal", "web", "static")
 	r.Handle("/*", http.FileServer(http.Dir(staticDir)))
@@ -126,9 +129,9 @@ func apiLogMiddleware() func(http.Handler) http.Handler {
 		slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{})),
 		&httplog.Options{
 			Level:           slog.LevelInfo,
-			Schema:          httplog.Schema{RequestBody: "request_body", ResponseBody: "response_body"},
-			LogRequestBody:  func(*http.Request) bool { return true },
-			LogResponseBody: func(*http.Request) bool { return true },
+			Schema:          httplog.Schema{ResponseStatus: "status", ResponseDuration: "duration_ms"},
+			LogRequestBody:  func(*http.Request) bool { return false },
+			LogResponseBody: func(*http.Request) bool { return false },
 			LogRequestHeaders: []string{},
 			LogResponseHeaders: []string{},
 			LogExtraAttrs: func(req *http.Request, _ string, _ int) []slog.Attr {
@@ -146,6 +149,49 @@ func apiLogMiddleware() func(http.Handler) http.Handler {
 			},
 		},
 	)
+}
+
+func bodyCaptureMiddleware() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			reqBody, err := io.ReadAll(r.Body)
+			if err != nil {
+				reqBody = nil
+			}
+			r.Body = io.NopCloser(bytes.NewReader(reqBody))
+
+			cw := &captureWriter{ResponseWriter: w}
+			next.ServeHTTP(cw, r)
+
+			if len(reqBody) > 0 {
+				httplog.SetAttrs(r.Context(), slog.Any("request_body", parseMaybeJSON(reqBody)))
+			} else {
+				httplog.SetAttrs(r.Context(), slog.Any("request_body", ""))
+			}
+			httplog.SetAttrs(r.Context(), slog.Any("response_body", parseMaybeJSON(cw.body.Bytes())))
+		})
+	}
+}
+
+type captureWriter struct {
+	http.ResponseWriter
+	body bytes.Buffer
+}
+
+func (c *captureWriter) Write(p []byte) (int, error) {
+	_, _ = c.body.Write(p)
+	return c.ResponseWriter.Write(p)
+}
+
+func parseMaybeJSON(b []byte) any {
+	if len(b) == 0 {
+		return ""
+	}
+	var out any
+	if err := json.Unmarshal(b, &out); err == nil {
+		return out
+	}
+	return string(b)
 }
 
 func logRoutes(r chi.Router) {
