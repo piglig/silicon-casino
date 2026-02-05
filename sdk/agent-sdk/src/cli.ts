@@ -1,13 +1,15 @@
 import { APAHttpClient } from "./http/client.js";
 import { resolveApiBase, requireArg } from "./utils/config.js";
-import readline from "node:readline";
+import { DecisionCallbackServer } from "./loop/callback.js";
+import { loadCredential, saveCredential } from "./loop/credentials.js";
+import { TurnTracker } from "./loop/state.js";
 
 type ArgMap = Record<string, string | boolean>;
 
 function parseArgs(argv: string[]): { command: string; args: ArgMap } {
   const [command = "help", ...rest] = argv;
   const args: ArgMap = {};
-  for (let i = 0; i < rest.length; i++) {
+  for (let i = 0; i < rest.length; i += 1) {
     const token = rest[i];
     if (!token.startsWith("--")) {
       continue;
@@ -35,8 +37,11 @@ function readString(args: ArgMap, key: string, envKey?: string): string | undefi
   return undefined;
 }
 
-function readNumber(args: ArgMap, key: string): number {
+function readNumber(args: ArgMap, key: string, fallback?: number): number {
   const raw = args[key];
+  if (raw === undefined && fallback !== undefined) {
+    return fallback;
+  }
   if (typeof raw !== "string") {
     throw new Error(`missing --${key}`);
   }
@@ -53,27 +58,13 @@ function printHelp(): void {
   apa-bot status --api-key <key> [--api-base <url>]
   apa-bot me --api-key <key> [--api-base <url>]
   apa-bot bind-key --api-key <key> --provider <openai|kimi> --vendor-key <key> --budget-usd <num> [--api-base <url>]
-  apa-bot runtime --agent-id <id> --api-key <key> --join <random|select> [--room-id <id>] [--api-base <url>]
+  apa-bot loop --join <random|select> [--room-id <id>]
+               [--provider <openai|kimi>] [--vendor-key <key> | --vendor-key-env <ENV>]
+               [--budget-usd <num>] [--callback-addr <host:port>] [--decision-timeout-ms <ms>] [--api-base <url>]
   apa-bot doctor [--api-base <url>]
 
 Config priority: CLI args > env (API_BASE) > defaults.`);
 }
-
-type RuntimeOptions = {
-  apiBase: string;
-  agentId: string;
-  apiKey: string;
-  joinMode: "random" | "select";
-  roomId?: string;
-};
-
-type DecisionResponse = {
-  type: "decision_response";
-  request_id: string;
-  action: "fold" | "check" | "call" | "raise" | "bet";
-  amount?: number;
-  thought_log?: string;
-};
 
 type SseEvent = {
   id: string;
@@ -151,90 +142,128 @@ async function parseSSE(
   return latestId;
 }
 
-async function runRuntime(opts: RuntimeOptions): Promise<void> {
-  const createRes = await fetch(`${opts.apiBase}/agent/sessions`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      agent_id: opts.agentId,
-      api_key: opts.apiKey,
-      join_mode: opts.joinMode,
-      room_id: opts.joinMode === "select" ? opts.roomId : undefined
-    })
-  });
-  if (!createRes.ok) {
-    const body = await createRes.text();
-    throw new Error(`create_session_failed_${createRes.status}:${body}`);
+function pickRoom(
+  rooms: Array<{ id: string; min_buyin_cc: number; name?: string }>,
+  joinMode: "random" | "select",
+  roomId?: string
+): { id: string; min_buyin_cc: number } {
+  if (rooms.length === 0) {
+    throw new Error("no_rooms_available");
   }
-  const created = await createRes.json() as {
-    session_id: string;
-    stream_url: string;
-  };
-  const sessionId = created.session_id;
-  const streamURL = created.stream_url.startsWith("http")
-    ? created.stream_url
-    : `${opts.apiBase.replace(/\/api\/?$/, "")}${created.stream_url}`;
+  if (joinMode === "select") {
+    const match = rooms.find((room) => room.id === roomId);
+    if (!match) {
+      throw new Error("room_not_found");
+    }
+    return { id: match.id, min_buyin_cc: match.min_buyin_cc };
+  }
+  const sorted = [...rooms].sort((a, b) => a.min_buyin_cc - b.min_buyin_cc);
+  return { id: sorted[0].id, min_buyin_cc: sorted[0].min_buyin_cc };
+}
+
+function getVendorKey(args: ArgMap): string {
+  const direct = readString(args, "vendor-key");
+  if (direct) {
+    return direct;
+  }
+  const envName = readString(args, "vendor-key-env");
+  if (envName && process.env[envName]) {
+    return process.env[envName] || "";
+  }
+  return "";
+}
+
+async function runLoop(args: ArgMap): Promise<void> {
+  const apiBase = resolveApiBase(readString(args, "api-base", "API_BASE"));
+  const joinRaw = requireArg("--join", readString(args, "join"));
+  const joinMode = joinRaw === "select" ? "select" : "random";
+  const roomId = joinMode === "select" ? requireArg("--room-id", readString(args, "room-id")) : undefined;
+  const provider = readString(args, "provider") || "";
+  const budgetUsd = readNumber(args, "budget-usd", 10);
+  const callbackAddr = readString(args, "callback-addr") || "127.0.0.1:8787";
+  const decisionTimeoutMs = readNumber(args, "decision-timeout-ms", 5000);
+
+  const client = new APAHttpClient({ apiBase });
+  const cached = await loadCredential(apiBase, undefined);
+  if (!cached) {
+    throw new Error("credential_not_found (run apa-bot register first)");
+  }
+  const agentId = cached.agent_id;
+  const apiKey = cached.api_key;
+
+  const status = await client.getAgentStatus(apiKey);
+  emit({ type: "agent_status", status });
+  if (status?.status === "pending") {
+    emit({ type: "claim_required", message: "agent is pending; complete claim before starting loop" });
+    return;
+  }
+
+  let me = await client.getAgentMe(apiKey);
+  let balance = Number(me?.balance_cc ?? 0);
+
+  const rooms = await client.listPublicRooms();
+  const pickedRoom = pickRoom(rooms.items || [], joinMode, roomId);
+
+  if (balance < pickedRoom.min_buyin_cc) {
+    const vendorKey = getVendorKey(args);
+    if (!provider) {
+      throw new Error("provider_required_for_topup");
+    }
+    if (!vendorKey) {
+      throw new Error("vendor_key_required_for_topup");
+    }
+    emit({ type: "topup_start", provider, budget_usd: budgetUsd });
+    await client.bindKey({ apiKey, provider, vendorKey, budgetUsd });
+    me = await client.getAgentMe(apiKey);
+    balance = Number(me?.balance_cc ?? 0);
+  }
+
+  if (balance < pickedRoom.min_buyin_cc) {
+    throw new Error(`insufficient_balance_after_topup (balance=${balance}, min=${pickedRoom.min_buyin_cc})`);
+  }
+
+  const callbackServer = new DecisionCallbackServer(callbackAddr);
+  const callbackURL = await callbackServer.start();
+
+  const session = await client.createSession({
+    agentID: agentId,
+    apiKey,
+    joinMode: "select",
+    roomID: pickedRoom.id
+  });
+  const sessionId = session.session_id as string;
+  const streamURL = String(session.stream_url || "");
+  const base = apiBase.replace(/\/api\/?$/, "");
+  const resolvedStreamURL = streamURL.startsWith("http") ? streamURL : `${base}${streamURL}`;
+
+  emit({
+    type: "ready",
+    agent_id: agentId,
+    session_id: sessionId,
+    stream_url: resolvedStreamURL,
+    callback_url: callbackURL
+  });
 
   let lastEventId = "";
-  const pending = new Map<string, { turnID: string }>();
-  const seenTurns = new Set<string>();
-  const rl = readline.createInterface({ input: process.stdin });
   let stopRequested = false;
+  const tracker = new TurnTracker();
 
-  rl.on("line", async (line: string) => {
-    const trimmed = line.trim();
-    if (!trimmed) return;
-    try {
-      const msg = JSON.parse(trimmed) as Record<string, unknown>;
-      if (msg.type === "stop") {
-        stopRequested = true;
-        return;
-      }
-      if (msg.type !== "decision_response") {
-        return;
-      }
-      const decision = msg as unknown as DecisionResponse;
-      const pendingTurn = pending.get(decision.request_id);
-      if (!pendingTurn) {
-        return;
-      }
-      pending.delete(decision.request_id);
-      const actionRes = await fetch(`${opts.apiBase}/agent/sessions/${sessionId}/actions`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          request_id: decision.request_id,
-          turn_id: pendingTurn.turnID,
-          action: decision.action,
-          amount: decision.amount,
-          thought_log: decision.thought_log || ""
-        })
-      });
-      let actionBody: any = {};
-      try {
-        actionBody = await actionRes.json();
-      } catch {
-        actionBody = {};
-      }
-      emit({
-        type: "action_result",
-        request_id: decision.request_id,
-        ok: actionRes.ok && actionBody.accepted === true,
-        body: actionBody
-      });
-    } catch (err) {
-      emit({
-        type: "runtime_error",
-        error: err instanceof Error ? err.message : String(err)
-      });
-    }
+  const stop = async (): Promise<void> => {
+    if (stopRequested) return;
+    stopRequested = true;
+    await callbackServer.stop();
+    await client.closeSession(sessionId);
+    emit({ type: "stopped", session_id: sessionId });
+  };
+
+  process.on("SIGINT", () => {
+    emit({ type: "signal", signal: "SIGINT" });
+    void stop();
   });
-
-  emit({ type: "ready", session_id: sessionId, stream_url: streamURL });
 
   while (!stopRequested) {
     try {
-      lastEventId = await parseSSE(streamURL, lastEventId, async (evt) => {
+      lastEventId = await parseSSE(resolvedStreamURL, lastEventId, async (evt) => {
         let envelope: any;
         try {
           envelope = JSON.parse(evt.data);
@@ -243,45 +272,59 @@ async function runRuntime(opts: RuntimeOptions): Promise<void> {
         }
         const evType = envelope?.event || evt.event;
         const data = envelope?.data || {};
-
         emit({ type: "server_event", event: evType, event_id: evt.id || "" });
+
+        if (evType === "session_closed") {
+          await stop();
+          return;
+        }
 
         if (evType !== "state_snapshot") {
           return;
         }
-        const turnID = typeof data.turn_id === "string" ? data.turn_id : "";
-        const mySeat = Number(data.my_seat ?? -1);
-        const actorSeat = Number(data.current_actor_seat ?? -2);
-        if (!turnID || mySeat !== actorSeat || seenTurns.has(turnID)) {
+
+        if (!tracker.shouldRequestDecision(data)) {
           return;
         }
-        seenTurns.add(turnID);
+
         const reqID = `req_${Date.now()}_${Math.floor(Math.random() * 1_000_000_000)}`;
-        pending.set(reqID, { turnID });
         emit({
           type: "decision_request",
           request_id: reqID,
           session_id: sessionId,
-          turn_id: turnID,
+          turn_id: data.turn_id,
+          callback_url: callbackURL,
           legal_actions: ["fold", "check", "call", "raise", "bet"],
           state: data
         });
+
+        try {
+          const decision = await callbackServer.waitForDecision(reqID, decisionTimeoutMs);
+          const result = await client.submitAction({
+            sessionID: sessionId,
+            requestID: reqID,
+            turnID: data.turn_id,
+            action: decision.action,
+            amount: decision.amount,
+            thoughtLog: decision.thought_log
+          });
+          emit({ type: "action_result", request_id: reqID, ok: true, body: result });
+        } catch (err) {
+          emit({
+            type: "decision_timeout",
+            request_id: reqID,
+            error: err instanceof Error ? err.message : String(err)
+          });
+        }
       });
     } catch (err) {
       emit({
         type: "stream_error",
         error: err instanceof Error ? err.message : String(err)
       });
-      if (stopRequested) {
-        break;
-      }
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
   }
-
-  rl.close();
-  await fetch(`${opts.apiBase}/agent/sessions/${sessionId}`, { method: "DELETE" }).catch(() => undefined);
-  emit({ type: "stopped", session_id: sessionId });
 }
 
 async function run(): Promise<void> {
@@ -343,19 +386,8 @@ async function run(): Promise<void> {
       console.log(JSON.stringify(report, null, 2));
       return;
     }
-    case "runtime": {
-      const agentId = requireArg("--agent-id", readString(args, "agent-id", "AGENT_ID"));
-      const apiKey = requireArg("--api-key", readString(args, "api-key", "APA_API_KEY"));
-      const joinRaw = requireArg("--join", readString(args, "join"));
-      const joinMode = joinRaw === "select" ? "select" : "random";
-      const roomId = joinMode === "select" ? requireArg("--room-id", readString(args, "room-id")) : undefined;
-      await runRuntime({
-        apiBase,
-        agentId,
-        apiKey,
-        joinMode,
-        roomId
-      });
+    case "loop": {
+      await runLoop(args);
       return;
     }
     default:

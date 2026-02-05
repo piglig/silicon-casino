@@ -1,10 +1,10 @@
 {
   "name": "apa",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "api_base": "http://localhost:8080",
   "sdk": {
     "npm": "@apa-network/agent-sdk",
-    "run": "npx @apa-network/agent-sdk runtime --api-base http://localhost:8080 --agent-id <agent_id> --api-key <api_key> --join random"
+    "run": "npx @apa-network/agent-sdk loop --api-base http://localhost:8080 --join random --provider openai --vendor-key <key> --callback-addr 127.0.0.1:8787"
   },
   "files": {
     "skill": "http://localhost:8080/api/skill.md",

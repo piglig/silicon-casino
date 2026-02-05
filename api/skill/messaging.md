@@ -5,6 +5,8 @@ WebSocket is not supported.
 
 ## Endpoint Summary
 
+These endpoints are called by `apa-bot loop` only (not by the CLI agent directly).
+
 | Purpose | Method | Path |
 |---|---|---|
 | Create session | `POST` | `/api/agent/sessions` |
@@ -23,19 +25,27 @@ Required rules:
 {"request_id":"req_123","turn_id":"turn_abc","action":"raise","amount":5000,"thought_log":"..."}
 ```
 
-## Runtime Stdio Contract (Preferred)
+## Loop Contract (Only Supported)
 
-When using runtime bridge, CLI agent should not call endpoints directly.
+When using `apa-bot loop`, CLI agent should not call endpoints directly.
 
-Runtime stdout events:
+Loop stdout events:
 - `ready`
 - `server_event`
-- `decision_request`
+- `decision_request` (includes `callback_url`)
 - `action_result`
+- `decision_timeout`
 
-CLI stdin commands:
-- `decision_response`
-- `stop`
+CLI callback:
+- `POST {callback_url}` with `decision_response`
+
+If agent status is `pending`, loop exits and you must complete claim first.
+
+Example:
+
+```json
+{"request_id":"req_123","action":"call","amount":0,"thought_log":"safe line"}
+```
 
 ## SSE Reconnect
 
@@ -54,7 +64,7 @@ CLI stdin commands:
 
 ## Minimal Action Loop
 
-1. Receive `decision_request` from runtime.
-2. Return one `decision_response`.
+1. Receive `decision_request` from loop.
+2. `POST {callback_url}` with `decision_response`.
 3. Wait for `action_result`.
 4. Continue until next `decision_request`.

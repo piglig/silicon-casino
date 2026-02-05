@@ -532,7 +532,8 @@ func registerAgentHandler(st *store.Store) http.HandlerFunc {
 			return
 		}
 		_ = st.EnsureAccount(r.Context(), id, 10000)
-		claimURL := "https://apa.network/claim/" + claimCode
+		// claimURL := "https://apa.network/claim/" + claimCode
+		claimURL := "http://localhost:8080/claim/" + claimCode
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"agent": map[string]any{
 				"agent_id":          id,

@@ -4,19 +4,51 @@ type HttpClientOptions = {
   apiBase?: string;
 };
 
+export type APAClientError = Error & {
+  status?: number;
+  code?: string;
+  body?: unknown;
+};
+
+type CreateSessionInput = {
+  agentID: string;
+  apiKey: string;
+  joinMode: "random" | "select";
+  roomID?: string;
+};
+
+type SubmitActionInput = {
+  sessionID: string;
+  requestID: string;
+  turnID: string;
+  action: "fold" | "check" | "call" | "raise" | "bet";
+  amount?: number;
+  thoughtLog?: string;
+};
+
 async function parseJson<T>(res: Response): Promise<T> {
   const text = await res.text();
   if (!text) {
-    throw new Error(`empty response (${res.status})`);
+    const err = new Error(`empty response (${res.status})`) as APAClientError;
+    err.status = res.status;
+    throw err;
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new Error(`invalid json response (${res.status})`);
+    const err = new Error(`invalid json response (${res.status})`) as APAClientError;
+    err.status = res.status;
+    err.body = text;
+    throw err;
   }
   if (!res.ok) {
-    throw new Error(`${res.status} ${(parsed as { error?: string })?.error || text}`);
+    const p = parsed as { error?: string };
+    const err = new Error(`${res.status} ${p?.error || text}`) as APAClientError;
+    err.status = res.status;
+    err.code = p?.error || "request_failed";
+    err.body = parsed;
+    throw err;
   }
   return parsed as T;
 }
@@ -65,6 +97,44 @@ export class APAHttpClient {
       })
     });
     return parseJson(res);
+  }
+
+  async listPublicRooms(): Promise<{ items: Array<{ id: string; min_buyin_cc: number; name: string }> }> {
+    const res = await fetch(`${this.apiBase}/public/rooms`);
+    return parseJson(res);
+  }
+
+  async createSession(input: CreateSessionInput): Promise<any> {
+    const res = await fetch(`${this.apiBase}/agent/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        agent_id: input.agentID,
+        api_key: input.apiKey,
+        join_mode: input.joinMode,
+        room_id: input.joinMode === "select" ? input.roomID : undefined
+      })
+    });
+    return parseJson(res);
+  }
+
+  async submitAction(input: SubmitActionInput): Promise<any> {
+    const res = await fetch(`${this.apiBase}/agent/sessions/${input.sessionID}/actions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        request_id: input.requestID,
+        turn_id: input.turnID,
+        action: input.action,
+        amount: input.amount,
+        thought_log: input.thoughtLog || ""
+      })
+    });
+    return parseJson(res);
+  }
+
+  async closeSession(sessionID: string): Promise<void> {
+    await fetch(`${this.apiBase}/agent/sessions/${sessionID}`, { method: "DELETE" });
   }
 
   async healthz(): Promise<any> {
