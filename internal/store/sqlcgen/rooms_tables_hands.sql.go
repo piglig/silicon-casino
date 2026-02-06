@@ -88,12 +88,27 @@ func (q *Queries) CreateTable(ctx context.Context, arg CreateTableParams) error 
 
 const endHand = `-- name: EndHand :exec
 UPDATE hands
-SET ended_at = now()
+SET ended_at = now(),
+    winner_agent_id = NULLIF($2::text, ''),
+    pot_cc = $3,
+    street_end = NULLIF($4::text, '')
 WHERE id = $1
 `
 
-func (q *Queries) EndHand(ctx context.Context, id string) error {
-	_, err := q.db.Exec(ctx, endHand, id)
+type EndHandParams struct {
+	ID      string
+	Column2 string
+	PotCc   pgtype.Int8
+	Column4 string
+}
+
+func (q *Queries) EndHand(ctx context.Context, arg EndHandParams) error {
+	_, err := q.db.Exec(ctx, endHand,
+		arg.ID,
+		arg.Column2,
+		arg.PotCc,
+		arg.Column4,
+	)
 	return err
 }
 

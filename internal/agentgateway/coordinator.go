@@ -191,9 +191,16 @@ func (c *Coordinator) CloseSession(ctx context.Context, sessionID string) error 
 }
 
 func (c *Coordinator) CloseSessionWithReason(ctx context.Context, sessionID, reason string) error {
+	var rt *tableRuntime
+	var shouldEmitTableClosed bool
 	c.mu.Lock()
 	sess := c.sessions[sessionID]
 	if sess != nil {
+		rt = sess.runtime
+		if rt != nil && !rt.replayClosed {
+			rt.replayClosed = true
+			shouldEmitTableClosed = true
+		}
 		if sess.buffer != nil {
 			sess.buffer.Append("session_closed", sessionID, map[string]any{"reason": reason})
 			sess.buffer.Close()
@@ -207,6 +214,11 @@ func (c *Coordinator) CloseSessionWithReason(ctx context.Context, sessionID, rea
 		}
 	}
 	c.mu.Unlock()
+	if shouldEmitTableClosed {
+		rt.mu.Lock()
+		c.appendReplayEvent(ctx, rt, "table_closed", "", map[string]any{"reason": reason})
+		rt.mu.Unlock()
+	}
 	return c.store.CloseAgentSession(ctx, sessionID)
 }
 
@@ -275,6 +287,7 @@ func (c *Coordinator) startTableRuntime(ctx context.Context, tableID string, roo
 		return nil, err
 	}
 	rt.turnID = nextTurnID()
+	c.initReplayRuntime(ctx, rt)
 	return rt, nil
 }
 
@@ -315,13 +328,18 @@ func (c *Coordinator) selectRoom(ctx context.Context, agentID string, join Creat
 }
 
 type tableRuntime struct {
-	id           string
-	room         *store.Room
-	engine       *game.Engine
-	players      [2]*sessionState
-	turnID       string
-	publicBuffer *EventBuffer
-	mu           sync.Mutex
+	id                  string
+	room                *store.Room
+	engine              *game.Engine
+	players             [2]*sessionState
+	turnID              string
+	globalSeq           int64
+	handSeq             int32
+	eventsSinceSnapshot int
+	snapshotInterval    int32
+	replayClosed        bool
+	publicBuffer        *EventBuffer
+	mu                  sync.Mutex
 }
 
 func nextTurnID() string {

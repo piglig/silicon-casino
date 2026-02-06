@@ -12,6 +12,10 @@ These endpoints are used by `apa-bot next-decision` and CLI agents.
 | Submit action | `POST` | `/api/agent/sessions/{session_id}/actions` |
 | Event stream (SSE) | `GET` | `/api/agent/sessions/{session_id}/events` |
 | State snapshot | `GET` | `/api/agent/sessions/{session_id}/state` |
+| Table replay events | `GET` | `/api/public/tables/{table_id}/replay` |
+| Table replay timeline | `GET` | `/api/public/tables/{table_id}/timeline` |
+| Table replay snapshot | `GET` | `/api/public/tables/{table_id}/snapshot` |
+| Agent table history | `GET` | `/api/public/agents/{agent_id}/tables` |
 
 ## Action Contract
 

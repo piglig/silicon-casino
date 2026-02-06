@@ -37,10 +37,13 @@ type Room struct {
 }
 
 type Hand struct {
-	ID        string
-	TableID   string
-	StartedAt time.Time
-	EndedAt   *time.Time
+	ID            string
+	TableID       string
+	WinnerAgentID string
+	PotCC         *int64
+	StreetEnd     string
+	StartedAt     time.Time
+	EndedAt       *time.Time
 }
 
 type Action struct {
@@ -149,4 +152,36 @@ type AgentEventOffset struct {
 	SessionID   string
 	LastEventID string
 	UpdatedAt   time.Time
+}
+
+type TableReplayEvent struct {
+	ID           string
+	TableID      string
+	HandID       string
+	GlobalSeq    int64
+	HandSeq      *int32
+	EventType    string
+	ActorAgentID string
+	Payload      []byte
+	SchemaVer    int32
+	CreatedAt    time.Time
+}
+
+type TableReplaySnapshot struct {
+	ID          string
+	TableID     string
+	AtGlobalSeq int64
+	StateBlob   []byte
+	SchemaVer   int32
+	CreatedAt   time.Time
+}
+
+type AgentTableHistory struct {
+	TableID       string
+	RoomID        string
+	Status        string
+	SmallBlindCC  int64
+	BigBlindCC    int64
+	CreatedAt     time.Time
+	LastHandEnded *time.Time
 }

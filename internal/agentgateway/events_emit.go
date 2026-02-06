@@ -37,7 +37,7 @@ func (c *Coordinator) emitPublicSnapshot(rt *tableRuntime) {
 	rt.publicBuffer.Append("table_snapshot", rt.id, state)
 }
 
-func (c *Coordinator) emitPublicActionLog(rt *tableRuntime, seat int, action string, amount *int64) {
+func (c *Coordinator) emitPublicActionLog(rt *tableRuntime, seat int, action string, amount *int64, thoughtLog string) {
 	if rt == nil || rt.publicBuffer == nil {
 		return
 	}
@@ -45,6 +45,7 @@ func (c *Coordinator) emitPublicActionLog(rt *tableRuntime, seat int, action str
 		"player_seat": seat,
 		"action":      action,
 		"amount":      amount,
+		"thought_log": thoughtLog,
 		"event":       "action",
 	})
 }

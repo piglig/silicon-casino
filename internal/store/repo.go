@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -110,7 +111,21 @@ func (s *Store) CreateHand(ctx context.Context, tableID string) (string, error) 
 }
 
 func (s *Store) EndHand(ctx context.Context, handID string) error {
-	return s.q.EndHand(ctx, handID)
+	return s.q.EndHand(ctx, sqlcgen.EndHandParams{
+		ID:      handID,
+		Column2: "",
+		PotCc:   int8PtrParam(nil),
+		Column4: "",
+	})
+}
+
+func (s *Store) EndHandWithSummary(ctx context.Context, handID, winnerAgentID string, potCC *int64, streetEnd string) error {
+	return s.q.EndHand(ctx, sqlcgen.EndHandParams{
+		ID:      handID,
+		Column2: winnerAgentID,
+		PotCc:   int8PtrParam(potCC),
+		Column4: streetEnd,
+	})
 }
 
 func (s *Store) RecordAction(ctx context.Context, handID, agentID, actionType string, amount int64) error {
@@ -857,4 +872,243 @@ func (s *Store) GetAgentEventOffset(ctx context.Context, sessionID string) (*Age
 func (s *Store) DebugSessionCount(ctx context.Context) (int, error) {
 	count, err := s.q.CountAgentSessions(ctx)
 	return int(count), err
+}
+
+func int32PtrParam(v *int32) pgtype.Int4 {
+	if v == nil {
+		return pgtype.Int4{}
+	}
+	return pgtype.Int4{Int32: *v, Valid: true}
+}
+
+func int32PtrVal(v pgtype.Int4) *int32 {
+	if !v.Valid {
+		return nil
+	}
+	out := v.Int32
+	return &out
+}
+
+func (s *Store) InsertTableReplayEvent(
+	ctx context.Context,
+	tableID, handID string,
+	globalSeq int64,
+	handSeq *int32,
+	eventType, actorAgentID string,
+	payload json.RawMessage,
+	schemaVersion int32,
+) error {
+	return s.q.InsertTableReplayEvent(ctx, sqlcgen.InsertTableReplayEventParams{
+		ID:            NewID(),
+		TableID:       tableID,
+		Column3:       handID,
+		GlobalSeq:     globalSeq,
+		HandSeq:       int32PtrParam(handSeq),
+		EventType:     eventType,
+		Column7:       actorAgentID,
+		Column8:       payload,
+		SchemaVersion: schemaVersion,
+	})
+}
+
+func (s *Store) ListTableReplayEventsFromSeq(ctx context.Context, tableID string, fromSeq int64, limit int) ([]TableReplayEvent, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	rows, err := s.q.ListTableReplayEventsFromSeq(ctx, sqlcgen.ListTableReplayEventsFromSeqParams{
+		TableID:   tableID,
+		GlobalSeq: fromSeq,
+		Limit:     int32(limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TableReplayEvent, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, TableReplayEvent{
+			ID:           r.ID,
+			TableID:      r.TableID,
+			HandID:       textVal(r.HandID),
+			GlobalSeq:    r.GlobalSeq,
+			HandSeq:      int32PtrVal(r.HandSeq),
+			EventType:    r.EventType,
+			ActorAgentID: textVal(r.ActorAgentID),
+			Payload:      r.Payload,
+			SchemaVer:    r.SchemaVersion,
+			CreatedAt:    r.CreatedAt.Time,
+		})
+	}
+	return out, nil
+}
+
+func (s *Store) GetTableReplayLastSeq(ctx context.Context, tableID string) (int64, error) {
+	return s.q.GetTableReplayLastSeq(ctx, tableID)
+}
+
+func (s *Store) InsertTableReplaySnapshot(
+	ctx context.Context,
+	tableID string,
+	atGlobalSeq int64,
+	stateBlob json.RawMessage,
+	schemaVersion int32,
+) error {
+	return s.q.InsertTableReplaySnapshot(ctx, sqlcgen.InsertTableReplaySnapshotParams{
+		ID:            NewID(),
+		TableID:       tableID,
+		AtGlobalSeq:   atGlobalSeq,
+		Column4:       stateBlob,
+		SchemaVersion: schemaVersion,
+	})
+}
+
+func (s *Store) GetLatestTableReplaySnapshotAtOrBefore(ctx context.Context, tableID string, atSeq int64) (*TableReplaySnapshot, error) {
+	r, err := s.q.GetLatestTableReplaySnapshotAtOrBefore(ctx, sqlcgen.GetLatestTableReplaySnapshotAtOrBeforeParams{
+		TableID:     tableID,
+		AtGlobalSeq: atSeq,
+	})
+	if err != nil {
+		return nil, mapNotFound(err)
+	}
+	return &TableReplaySnapshot{
+		ID:          r.ID,
+		TableID:     r.TableID,
+		AtGlobalSeq: r.AtGlobalSeq,
+		StateBlob:   r.StateBlob,
+		SchemaVer:   r.SchemaVersion,
+		CreatedAt:   r.CreatedAt.Time,
+	}, nil
+}
+
+func (s *Store) ListHandsByTableID(ctx context.Context, tableID string) ([]Hand, error) {
+	rows, err := s.q.ListHandsByTableID(ctx, tableID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Hand, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, Hand{
+			ID:            r.ID,
+			TableID:       r.TableID,
+			WinnerAgentID: textVal(r.WinnerAgentID),
+			PotCC:         int64PtrVal(r.PotCc),
+			StreetEnd:     textVal(r.StreetEnd),
+			StartedAt:     r.StartedAt.Time,
+			EndedAt:       timePtrVal(r.EndedAt),
+		})
+	}
+	return out, nil
+}
+
+func (s *Store) GetHandByID(ctx context.Context, handID string) (*Hand, error) {
+	r, err := s.q.GetHandByID(ctx, handID)
+	if err != nil {
+		return nil, mapNotFound(err)
+	}
+	return &Hand{
+		ID:            r.ID,
+		TableID:       r.TableID,
+		WinnerAgentID: textVal(r.WinnerAgentID),
+		PotCC:         int64PtrVal(r.PotCc),
+		StreetEnd:     textVal(r.StreetEnd),
+		StartedAt:     r.StartedAt.Time,
+		EndedAt:       timePtrVal(r.EndedAt),
+	}, nil
+}
+
+func (s *Store) ListHandsByAgentID(ctx context.Context, agentID string, limit, offset int) ([]Hand, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.q.ListHandsByAgentID(ctx, sqlcgen.ListHandsByAgentIDParams{
+		AgentID: agentID,
+		Limit:   int32(limit),
+		Offset:  int32(offset),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Hand, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, Hand{
+			ID:            r.ID,
+			TableID:       r.TableID,
+			WinnerAgentID: textVal(r.WinnerAgentID),
+			PotCC:         int64PtrVal(r.PotCc),
+			StreetEnd:     textVal(r.StreetEnd),
+			StartedAt:     r.StartedAt.Time,
+			EndedAt:       timePtrVal(r.EndedAt),
+		})
+	}
+	return out, nil
+}
+
+func (s *Store) ListAgentTables(ctx context.Context, agentID string, limit, offset int) ([]AgentTableHistory, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.q.ListAgentTables(ctx, sqlcgen.ListAgentTablesParams{
+		AgentID: agentID,
+		Limit:   int32(limit),
+		Offset:  int32(offset),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AgentTableHistory, 0, len(rows))
+	for _, r := range rows {
+		var endedAt *time.Time
+		switch v := r.LastHandEndedAt.(type) {
+		case time.Time:
+			vt := v
+			endedAt = &vt
+		case pgtype.Timestamptz:
+			endedAt = timePtrVal(v)
+		}
+		out = append(out, AgentTableHistory{
+			TableID:       r.ID,
+			RoomID:        textVal(r.RoomID),
+			Status:        r.Status,
+			SmallBlindCC:  r.SmallBlindCc,
+			BigBlindCC:    r.BigBlindCc,
+			CreatedAt:     r.CreatedAt.Time,
+			LastHandEnded: endedAt,
+		})
+	}
+	return out, nil
+}
+
+func (s *Store) ListTableHistory(ctx context.Context, roomID, agentID string, limit, offset int) ([]AgentTableHistory, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.q.ListTableHistory(ctx, sqlcgen.ListTableHistoryParams{
+		Column1: roomID,
+		Column2: agentID,
+		Limit:   int32(limit),
+		Offset:  int32(offset),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AgentTableHistory, 0, len(rows))
+	for _, r := range rows {
+		var endedAt *time.Time
+		switch v := r.LastHandEndedAt.(type) {
+		case time.Time:
+			vt := v
+			endedAt = &vt
+		case pgtype.Timestamptz:
+			endedAt = timePtrVal(v)
+		}
+		out = append(out, AgentTableHistory{
+			TableID:       r.ID,
+			RoomID:        textVal(r.RoomID),
+			Status:        r.Status,
+			SmallBlindCC:  r.SmallBlindCc,
+			BigBlindCC:    r.BigBlindCc,
+			CreatedAt:     r.CreatedAt.Time,
+			LastHandEnded: endedAt,
+		})
+	}
+	return out, nil
 }

@@ -206,7 +206,12 @@ Rooms:
 - `POST /api/rooms` (admin)
 - `GET /api/public/rooms`
  - `GET /api/public/tables?room_id=...`
+ - `GET /api/public/tables/history?room_id=...&agent_id=...`
  - `GET /api/public/agent-table?agent_id=...`
+ - `GET /api/public/tables/{table_id}/replay?from_seq=...&limit=...`
+ - `GET /api/public/tables/{table_id}/timeline`
+ - `GET /api/public/tables/{table_id}/snapshot?at_seq=...`
+ - `GET /api/public/agents/{agent_id}/tables`
 
 Ledger/Balance:
 - `GET /api/ledger` (admin)

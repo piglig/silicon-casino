@@ -93,13 +93,57 @@ func (c *Coordinator) SubmitAction(ctx context.Context, sessionID string, req Ac
 		}
 		return &res, errInvalidAction
 	}
-	c.emitPublicActionLog(rt, actor, req.Action, req.Amount)
-	if done {
-		if handDone := rt.handleRoundEnd(ctx); handDone {
-			_ = rt.startNextHand(ctx)
-		}
+	c.emitPublicActionLog(rt, actor, req.Action, req.Amount, req.ThoughtLog)
+	c.appendReplayEvent(ctx, rt, "action_applied", sess.agent.ID, map[string]any{
+		"hand_id":     rt.engine.State.HandID,
+		"turn_id":     req.TurnID,
+		"seat_id":     actor,
+		"action":      req.Action,
+		"amount_cc":   req.Amount,
+		"thought_log": req.ThoughtLog,
+	})
+	if req.ThoughtLog != "" {
+		c.appendReplayEvent(ctx, rt, "thought_log", sess.agent.ID, map[string]any{
+			"hand_id":     rt.engine.State.HandID,
+			"seat_id":     actor,
+			"thought_log": req.ThoughtLog,
+		})
 	}
-	rt.turnID = nextTurnID()
+	prevStreet := rt.engine.State.Street
+	if done {
+		if handDone, winner := rt.handleRoundEnd(ctx); handDone {
+			pot := rt.engine.State.Pot
+			_ = c.store.EndHandWithSummary(ctx, rt.engine.State.HandID, winner, &pot, string(rt.engine.State.Street))
+			c.appendReplayEvent(ctx, rt, "showdown", "", map[string]any{
+				"hand_id":  rt.engine.State.HandID,
+				"showdown": buildShowdownPayload(rt),
+			})
+			c.appendReplayEvent(ctx, rt, "hand_settled", winner, map[string]any{
+				"hand_id": rt.engine.State.HandID,
+				"winner":  winner,
+				"pot_cc":  pot,
+				"street":  string(rt.engine.State.Street),
+			})
+			if err := rt.startNextHand(ctx); err == nil {
+				rt.turnID = nextTurnID()
+				rt.handSeq = 0
+				c.appendReplayEvent(ctx, rt, "hand_started", "", map[string]any{
+					"hand_id": rt.engine.State.HandID,
+					"street":  string(rt.engine.State.Street),
+				})
+				c.appendReplayEvent(ctx, rt, "state_snapshot", "", c.buildReplayState(rt))
+			}
+		} else if prevStreet != rt.engine.State.Street {
+			rt.turnID = nextTurnID()
+			c.appendReplayEvent(ctx, rt, "street_advanced", "", map[string]any{
+				"hand_id": rt.engine.State.HandID,
+				"street":  string(rt.engine.State.Street),
+			})
+		}
+	} else {
+		rt.turnID = nextTurnID()
+	}
+	c.appendReplayEvent(ctx, rt, "state_snapshot", "", c.buildReplayState(rt))
 	res := ActionResponse{Accepted: true, RequestID: req.RequestID}
 	_, err = c.saveActionResult(ctx, sessionID, req, res)
 	if err != nil {
@@ -136,23 +180,23 @@ func mapApplyError(err error) string {
 	}
 }
 
-func (rt *tableRuntime) handleRoundEnd(ctx context.Context) bool {
+func (rt *tableRuntime) handleRoundEnd(ctx context.Context) (bool, string) {
 	st := rt.engine.State
 	if st.Players[0].Folded || st.Players[1].Folded {
-		_, _ = rt.engine.Settle(ctx)
-		return true
+		winner, _ := rt.engine.Settle(ctx)
+		return true, winner
 	}
 	if st.Players[0].AllIn || st.Players[1].AllIn {
 		rt.engine.FastForwardToShowdown()
-		_, _ = rt.engine.Settle(ctx)
-		return true
+		winner, _ := rt.engine.Settle(ctx)
+		return true, winner
 	}
 	if st.Street == game.StreetRiver {
-		_, _ = rt.engine.Settle(ctx)
-		return true
+		winner, _ := rt.engine.Settle(ctx)
+		return true, winner
 	}
 	rt.engine.NextStreet()
-	return false
+	return false, ""
 }
 
 func (rt *tableRuntime) startNextHand(ctx context.Context) error {

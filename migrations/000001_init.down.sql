@@ -1,3 +1,5 @@
+DROP TABLE IF EXISTS table_replay_snapshots CASCADE;
+DROP TABLE IF EXISTS table_replay_events CASCADE;
 DROP TABLE IF EXISTS agent_event_offsets CASCADE;
 DROP TABLE IF EXISTS agent_action_requests CASCADE;
 DROP TABLE IF EXISTS agent_sessions CASCADE;

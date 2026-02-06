@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS tables (
 CREATE TABLE IF NOT EXISTS hands (
   id TEXT PRIMARY KEY,
   table_id TEXT NOT NULL REFERENCES tables(id) ON DELETE CASCADE,
+  winner_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+  pot_cc BIGINT,
+  street_end TEXT,
   started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   ended_at TIMESTAMPTZ
 );
@@ -129,3 +132,39 @@ CREATE TABLE IF NOT EXISTS agent_event_offsets (
   last_event_id TEXT NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS table_replay_events (
+  id TEXT PRIMARY KEY,
+  table_id TEXT NOT NULL REFERENCES tables(id) ON DELETE CASCADE,
+  hand_id TEXT REFERENCES hands(id) ON DELETE SET NULL,
+  global_seq BIGINT NOT NULL,
+  hand_seq INT,
+  event_type TEXT NOT NULL,
+  actor_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+  payload JSONB NOT NULL,
+  schema_version INT NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (table_id, global_seq)
+);
+
+CREATE INDEX IF NOT EXISTS idx_table_replay_events_table_seq
+  ON table_replay_events (table_id, global_seq);
+
+CREATE INDEX IF NOT EXISTS idx_table_replay_events_table_created
+  ON table_replay_events (table_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_table_replay_events_table_hand_seq
+  ON table_replay_events (table_id, hand_id, hand_seq);
+
+CREATE TABLE IF NOT EXISTS table_replay_snapshots (
+  id TEXT PRIMARY KEY,
+  table_id TEXT NOT NULL REFERENCES tables(id) ON DELETE CASCADE,
+  at_global_seq BIGINT NOT NULL,
+  state_blob JSONB NOT NULL,
+  schema_version INT NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (table_id, at_global_seq)
+);
+
+CREATE INDEX IF NOT EXISTS idx_table_replay_snapshots_table_seq_desc
+  ON table_replay_snapshots (table_id, at_global_seq DESC);

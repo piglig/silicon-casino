@@ -84,10 +84,13 @@ type AgentSession struct {
 }
 
 type Hand struct {
-	ID        string
-	TableID   string
-	StartedAt pgtype.Timestamptz
-	EndedAt   pgtype.Timestamptz
+	ID            string
+	TableID       string
+	WinnerAgentID pgtype.Text
+	PotCc         pgtype.Int8
+	StreetEnd     pgtype.Text
+	StartedAt     pgtype.Timestamptz
+	EndedAt       pgtype.Timestamptz
 }
 
 type LedgerEntry struct {
@@ -137,4 +140,26 @@ type Table struct {
 	SmallBlindCc int64
 	BigBlindCc   int64
 	CreatedAt    pgtype.Timestamptz
+}
+
+type TableReplayEvent struct {
+	ID            string
+	TableID       string
+	HandID        pgtype.Text
+	GlobalSeq     int64
+	HandSeq       pgtype.Int4
+	EventType     string
+	ActorAgentID  pgtype.Text
+	Payload       []byte
+	SchemaVersion int32
+	CreatedAt     pgtype.Timestamptz
+}
+
+type TableReplaySnapshot struct {
+	ID            string
+	TableID       string
+	AtGlobalSeq   int64
+	StateBlob     []byte
+	SchemaVersion int32
+	CreatedAt     pgtype.Timestamptz
 }

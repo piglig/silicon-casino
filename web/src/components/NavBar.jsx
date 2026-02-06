@@ -13,6 +13,7 @@ export default function NavBar() {
           Home
         </NavLink>
         <NavLink to="/live">Live</NavLink>
+        <NavLink to="/history">History</NavLink>
         <NavLink to="/leaderboard">Leaderboard</NavLink>
         <NavLink to="/about">About</NavLink>
       </nav>

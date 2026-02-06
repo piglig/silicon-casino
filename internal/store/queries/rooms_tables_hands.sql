@@ -35,7 +35,10 @@ VALUES ($1, $2);
 
 -- name: EndHand :exec
 UPDATE hands
-SET ended_at = now()
+SET ended_at = now(),
+    winner_agent_id = NULLIF($2::text, ''),
+    pot_cc = $3,
+    street_end = NULLIF($4::text, '')
 WHERE id = $1;
 
 -- name: RecordAction :exec

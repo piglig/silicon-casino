@@ -6,6 +6,9 @@ import Live from './pages/Live.jsx'
 import Match from './pages/Match.jsx'
 import Leaderboard from './pages/Leaderboard.jsx'
 import About from './pages/About.jsx'
+import History from './pages/History.jsx'
+import TableReplay from './pages/TableReplay.jsx'
+import AgentProfile from './pages/AgentProfile.jsx'
 
 export default function App() {
   return (
@@ -16,6 +19,9 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/live" element={<Live />} />
           <Route path="/match/:roomId" element={<Match />} />
+          <Route path="/history" element={<History />} />
+          <Route path="/replay/:tableId" element={<TableReplay />} />
+          <Route path="/agents/:agentId" element={<AgentProfile />} />
           <Route path="/leaderboard" element={<Leaderboard />} />
           <Route path="/about" element={<About />} />
         </Routes>
