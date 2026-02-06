@@ -1,8 +1,10 @@
 import { APAHttpClient } from "./http/client.js";
 import { resolveApiBase, requireArg } from "./utils/config.js";
-import { DecisionCallbackServer } from "./loop/callback.js";
 import { loadCredential, saveCredential } from "./loop/credentials.js";
+import { loadDecisionState, saveDecisionState } from "./loop/decision_state.js";
 import { TurnTracker } from "./loop/state.js";
+import { buildCredentialFromRegisterResult } from "./commands/register.js";
+import { recoverSessionFromConflict, resolveStreamURL } from "./commands/session_recovery.js";
 
 type ArgMap = Record<string, string | boolean>;
 
@@ -58,8 +60,8 @@ function printHelp(): void {
   apa-bot claim (--claim-code <code> | --claim-url <url>) [--api-base <url>]
   apa-bot me [--api-base <url>]
   apa-bot bind-key --provider <openai|kimi> --vendor-key <key> --budget-usd <num> [--api-base <url>]
-  apa-bot loop --join <random|select> [--room-id <id>]
-               [--callback-addr <host:port>] [--decision-timeout-ms <ms>] [--api-base <url>]
+  apa-bot next-decision --join <random|select> [--room-id <id>]
+                       [--timeout-ms <ms>] [--api-base <url>]
   apa-bot doctor [--api-base <url>]
 
 Config priority: CLI args > env (API_BASE) > defaults.`);
@@ -93,68 +95,84 @@ function emit(message: Record<string, unknown>): void {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 }
 
-async function parseSSE(
+
+async function parseSSEOnce(
   url: string,
   lastEventId: string,
-  onEvent: (evt: SseEvent) => Promise<void>
+  timeoutMs: number,
+  onEvent: (evt: SseEvent) => Promise<boolean>
 ): Promise<string> {
   const headers: Record<string, string> = { Accept: "text/event-stream" };
   if (lastEventId) {
     headers["Last-Event-ID"] = lastEventId;
   }
-  const res = await fetch(url, { method: "GET", headers });
-  if (!res.ok || !res.body) {
-    throw new Error(`stream_open_failed_${res.status}`);
-  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
+  let latestId = lastEventId;
   let buffer = "";
   let currentId = "";
   let currentEvent = "";
   let currentData = "";
-  let latestId = lastEventId;
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
-    for (const rawLine of lines) {
-      const line = rawLine.trimEnd();
-      if (line.startsWith("id:")) {
-        currentId = line.slice(3).trim();
-        continue;
-      }
-      if (line.startsWith("event:")) {
-        currentEvent = line.slice(6).trim();
-        continue;
-      }
-      if (line.startsWith("data:")) {
-        const piece = line.slice(5).trimStart();
-        currentData = currentData ? `${currentData}\n${piece}` : piece;
-        continue;
-      }
-      if (line !== "") {
-        continue;
-      }
-      if (!currentData) {
+  try {
+    const res = await fetch(url, { method: "GET", headers, signal: controller.signal });
+    if (!res.ok || !res.body) {
+      throw new Error(`stream_open_failed_${res.status}`);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const rawLine of lines) {
+        const line = rawLine.trimEnd();
+        if (line.startsWith("id:")) {
+          currentId = line.slice(3).trim();
+          continue;
+        }
+        if (line.startsWith("event:")) {
+          currentEvent = line.slice(6).trim();
+          continue;
+        }
+        if (line.startsWith("data:")) {
+          const piece = line.slice(5).trimStart();
+          currentData = currentData ? `${currentData}\n${piece}` : piece;
+          continue;
+        }
+        if (line !== "") {
+          continue;
+        }
+        if (!currentData) {
+          currentId = "";
+          currentEvent = "";
+          continue;
+        }
+        const evt: SseEvent = {
+          id: currentId,
+          event: currentEvent,
+          data: currentData
+        };
+        if (evt.id) latestId = evt.id;
+        const shouldStop = await onEvent(evt);
         currentId = "";
         currentEvent = "";
-        continue;
+        currentData = "";
+        if (shouldStop) {
+          controller.abort();
+          break;
+        }
       }
-      const evt: SseEvent = {
-        id: currentId,
-        event: currentEvent,
-        data: currentData
-      };
-      if (evt.id) latestId = evt.id;
-      await onEvent(evt);
-      currentId = "";
-      currentEvent = "";
-      currentData = "";
     }
+  } catch (err) {
+    if (!(err instanceof Error && err.name === "AbortError")) {
+      throw err;
+    }
+  } finally {
+    clearTimeout(timeout);
   }
   return latestId;
 }
@@ -178,13 +196,77 @@ function pickRoom(
   return { id: sorted[0].id, min_buyin_cc: sorted[0].min_buyin_cc };
 }
 
-async function runLoop(args: ArgMap): Promise<void> {
+async function sessionExists(apiBase: string, sessionId: string): Promise<boolean> {
+  const res = await fetch(`${apiBase}/agent/sessions/${sessionId}/state`);
+  return res.ok;
+}
+
+async function ensureSession(
+  client: APAHttpClient,
+  apiBase: string,
+  agentId: string,
+  apiKey: string,
+  joinMode: "random" | "select",
+  roomId?: string
+): Promise<{ session_id: string; stream_url: string }> {
+  const cachedState = await loadDecisionState();
+  if (cachedState.session_id && cachedState.stream_url) {
+    const ok = await sessionExists(apiBase, cachedState.session_id);
+    if (ok) {
+      return { session_id: cachedState.session_id, stream_url: cachedState.stream_url };
+    }
+  }
+
+  const me = await client.getAgentMe(apiKey);
+  if (me?.status === "pending") {
+    emit({ type: "claim_required", message: "agent is pending; complete claim before starting" });
+    throw new Error("agent_pending");
+  }
+  const balance = Number(me?.balance_cc ?? 0);
+  const rooms = await client.listPublicRooms();
+  const pickedRoom = pickRoom(rooms.items || [], joinMode, roomId);
+  if (balance < pickedRoom.min_buyin_cc) {
+    throw new Error(`insufficient_balance (balance=${balance}, min=${pickedRoom.min_buyin_cc})`);
+  }
+  const session = await client.createSession({
+	agentID: agentId,
+	apiKey,
+	joinMode: "select",
+	roomID: pickedRoom.id
+	}).catch(async (err: unknown) => {
+    const recovered = recoverSessionFromConflict(err, apiBase);
+    if (!recovered) {
+      throw err;
+    }
+    await saveDecisionState({
+      session_id: recovered.session_id,
+      stream_url: recovered.stream_url,
+      last_event_id: "",
+      last_turn_id: ""
+    });
+    return {
+      session_id: recovered.session_id,
+      stream_url: recovered.stream_url
+    };
+  });
+  const sessionId = String(session.session_id || "");
+  const streamURL = String(session.stream_url || "");
+  const resolvedStreamURL = resolveStreamURL(apiBase, streamURL);
+  await saveDecisionState({
+    session_id: sessionId,
+    stream_url: resolvedStreamURL,
+    last_event_id: "",
+    last_turn_id: ""
+  });
+  return { session_id: sessionId, stream_url: resolvedStreamURL };
+}
+
+async function runNextDecision(args: ArgMap): Promise<void> {
   const apiBase = resolveApiBase(readString(args, "api-base", "API_BASE"));
   const joinRaw = requireArg("--join", readString(args, "join"));
   const joinMode = joinRaw === "select" ? "select" : "random";
   const roomId = joinMode === "select" ? requireArg("--room-id", readString(args, "room-id")) : undefined;
-  const callbackAddr = readString(args, "callback-addr");
-  const decisionTimeoutMs = readNumber(args, "decision-timeout-ms", 5000);
+  const timeoutMs = readNumber(args, "timeout-ms", 5000);
 
   const client = new APAHttpClient({ apiBase });
   const cached = await loadCredential(apiBase, undefined);
@@ -194,130 +276,78 @@ async function runLoop(args: ArgMap): Promise<void> {
   const agentId = cached.agent_id;
   const apiKey = cached.api_key;
 
-  const meStatus = await client.getAgentMe(apiKey);
-  emit({ type: "agent_status", status: meStatus });
-  if (meStatus?.status === "pending") {
-    emit({ type: "claim_required", message: "agent is pending; complete claim before starting loop" });
-    return;
-  }
-
-  let me = await client.getAgentMe(apiKey);
-  let balance = Number(me?.balance_cc ?? 0);
-
-  const rooms = await client.listPublicRooms();
-  const pickedRoom = pickRoom(rooms.items || [], joinMode, roomId);
-
-  if (balance < pickedRoom.min_buyin_cc) {
-    throw new Error(`insufficient_balance (balance=${balance}, min=${pickedRoom.min_buyin_cc})`);
-  }
-
-  const callbackServer = new DecisionCallbackServer(callbackAddr);
-  const callbackURL = await callbackServer.start();
-
-  const session = await client.createSession({
-    agentID: agentId,
+  const { session_id: sessionId, stream_url: streamURL } = await ensureSession(
+    client,
+    apiBase,
+    agentId,
     apiKey,
-    joinMode: "select",
-    roomID: pickedRoom.id
-  });
-  const sessionId = session.session_id as string;
-  const streamURL = String(session.stream_url || "");
-  const base = apiBase.replace(/\/api\/?$/, "");
-  const resolvedStreamURL = streamURL.startsWith("http") ? streamURL : `${base}${streamURL}`;
+    joinMode,
+    roomId
+  );
 
-  emit({
-    type: "ready",
-    agent_id: agentId,
-    session_id: sessionId,
-    stream_url: resolvedStreamURL,
-    callback_url: callbackURL
-  });
-
-  let lastEventId = "";
-  let stopRequested = false;
+  const state = await loadDecisionState();
+  const lastEventId = state.last_event_id || "";
   const tracker = new TurnTracker();
 
-  const stop = async (): Promise<void> => {
-    if (stopRequested) return;
-    stopRequested = true;
-    await callbackServer.stop();
-    await client.closeSession(sessionId);
-    emit({ type: "stopped", session_id: sessionId });
-  };
+  let decided = false;
+  let newLastEventId = lastEventId;
 
-  process.on("SIGINT", () => {
-    emit({ type: "signal", signal: "SIGINT" });
-    void stop();
-  });
+  try {
+    newLastEventId = await parseSSEOnce(streamURL, lastEventId, timeoutMs, async (evt) => {
+      let envelope: any;
+      try {
+        envelope = JSON.parse(evt.data);
+      } catch {
+        return false;
+      }
+      const evType = envelope?.event || evt.event;
+      const data = envelope?.data || {};
 
-  while (!stopRequested) {
-    try {
-      lastEventId = await parseSSE(resolvedStreamURL, lastEventId, async (evt) => {
-        let envelope: any;
-        try {
-          envelope = JSON.parse(evt.data);
-        } catch {
-          return;
-        }
-        const evType = envelope?.event || evt.event;
-        const data = envelope?.data || {};
-        emit({ type: "server_event", event: evType, event_id: evt.id || "" });
+      if (evType === "session_closed") {
+        await saveDecisionState({ session_id: "", stream_url: "", last_event_id: "", last_turn_id: "" });
+        emit({ type: "session_closed", session_id: sessionId });
+        return true;
+      }
+      if (evType !== "state_snapshot") {
+        return false;
+      }
+      if (!tracker.shouldRequestDecision(data)) {
+        return false;
+      }
 
-        if (evType === "session_closed") {
-          await stop();
-          return;
-        }
-
-        if (evType !== "state_snapshot") {
-          return;
-        }
-
-        if (!tracker.shouldRequestDecision(data)) {
-          return;
-        }
-
-        const reqID = `req_${Date.now()}_${Math.floor(Math.random() * 1_000_000_000)}`;
-        emit({
-          type: "decision_request",
-          request_id: reqID,
-          session_id: sessionId,
-          turn_id: data.turn_id,
-          callback_url: callbackURL,
-          legal_actions: ["fold", "check", "call", "raise", "bet"],
-          state: data
-        });
-
-        try {
-          const decision = await callbackServer.waitForDecision(reqID, decisionTimeoutMs);
-          const result = await client.submitAction({
-            sessionID: sessionId,
-            requestID: reqID,
-            turnID: data.turn_id,
-            action: decision.action,
-            amount: decision.amount,
-            thoughtLog: decision.thought_log
-          });
-          emit({ type: "action_result", request_id: reqID, ok: true, body: result });
-        } catch (err) {
-          emit({
-            type: "decision_timeout",
-            request_id: reqID,
-            error: err instanceof Error ? err.message : String(err)
-          });
-        }
-      });
-    } catch (err) {
+      const reqID = `req_${Date.now()}_${Math.floor(Math.random() * 1_000_000_000)}`;
+      const callbackURL = `${apiBase}/agent/sessions/${sessionId}/actions`;
       emit({
-        type: "stream_error",
-        error: err instanceof Error ? err.message : String(err)
+        type: "decision_request",
+        request_id: reqID,
+        session_id: sessionId,
+        turn_id: data.turn_id,
+        callback_url: callbackURL,
+        legal_actions: ["fold", "check", "call", "raise", "bet"],
+        state: data
       });
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    }
+      decided = true;
+      return true;
+    });
+  } catch (err) {
+    emit({ type: "error", error: err instanceof Error ? err.message : String(err) });
+    throw err;
+  } finally {
+    await saveDecisionState({
+      session_id: sessionId,
+      stream_url: streamURL,
+      last_event_id: newLastEventId,
+      last_turn_id: ""
+    });
+  }
+
+  if (!decided) {
+    emit({ type: "noop" });
   }
 }
 
-async function run(): Promise<void> {
-  const { command, args } = parseArgs(process.argv.slice(2));
+export async function runCLI(argv: string[] = process.argv.slice(2)): Promise<void> {
+  const { command, args } = parseArgs(argv);
 
   if (command === "help" || command === "--help" || command === "-h") {
     printHelp();
@@ -332,6 +362,10 @@ async function run(): Promise<void> {
       const name = requireArg("--name", readString(args, "name"));
       const description = requireArg("--description", readString(args, "description"));
       const result = await client.registerAgent({ name, description });
+      const record = buildCredentialFromRegisterResult(result, apiBase, name);
+      if (record) {
+        await saveCredential(record);
+      }
       console.log(JSON.stringify(result, null, 2));
       return;
     }
@@ -380,8 +414,8 @@ async function run(): Promise<void> {
       console.log(JSON.stringify(report, null, 2));
       return;
     }
-    case "loop": {
-      await runLoop(args);
+    case "next-decision": {
+      await runNextDecision(args);
       return;
     }
     default:
@@ -389,8 +423,3 @@ async function run(): Promise<void> {
       throw new Error(`unknown command: ${command}`);
   }
 }
-
-run().catch((err) => {
-  console.error(err instanceof Error ? err.message : String(err));
-  process.exit(1);
-});

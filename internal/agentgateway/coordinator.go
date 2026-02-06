@@ -11,6 +11,8 @@ import (
 	"silicon-casino/internal/game"
 	"silicon-casino/internal/ledger"
 	"silicon-casino/internal/store"
+
+	"github.com/rs/zerolog/log"
 )
 
 const sessionTTL = 2 * time.Hour
@@ -43,6 +45,21 @@ func NewCoordinator(st *store.Store, led *ledger.Ledger) *Coordinator {
 		byAgent:  map[string]*sessionState{},
 		tables:   map[string]*tableRuntime{},
 	}
+}
+
+func (c *Coordinator) StartJanitor(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case now := <-ticker.C:
+				_ = c.expireSessions(ctx, now)
+			}
+		}
+	}()
 }
 
 func (c *Coordinator) CreateSession(ctx context.Context, req CreateSessionRequest) (*CreateSessionResponse, error) {
@@ -112,24 +129,39 @@ func (c *Coordinator) CreateSession(ctx context.Context, req CreateSessionReques
 	second.seat = seat1
 	c.mu.Unlock()
 
-	createdTableID, err := c.store.CreateTable(ctx, room.ID, "active", room.SmallBlindCC, room.BigBlindCC)
-	if err != nil {
-		return nil, err
-	}
-	tableID = createdTableID
-	waiter.session.TableID = tableID
-	second.session.TableID = tableID
-	if err := c.store.CreateAgentSession(ctx, second.session); err != nil {
-		return nil, err
-	}
-	if err := c.store.UpdateAgentSessionMatch(ctx, waiter.session.ID, tableID, seat0); err != nil {
-		return nil, err
-	}
-	if err := c.store.UpdateAgentSessionMatch(ctx, second.session.ID, tableID, seat1); err != nil {
+	if err := c.store.CreateMatchedTableAndSessions(ctx, tableID, room.ID, room.SmallBlindCC, room.BigBlindCC, waiter.session.ID, second.session, seat0, seat1); err != nil {
+		log.Error().
+			Err(err).
+			Str("table_id", tableID).
+			Str("room_id", room.ID).
+			Str("waiter_session_id", waiter.session.ID).
+			Str("second_session_id", second.session.ID).
+			Str("waiter_agent_id", waiter.agent.ID).
+			Str("second_agent_id", second.agent.ID).
+			Msg("create matched table and sessions failed")
+		c.mu.Lock()
+		delete(c.sessions, second.session.ID)
+		delete(c.byAgent, second.agent.ID)
+		waiter.session.TableID = ""
+		waiter.session.SeatID = nil
+		waiter.session.Status = "waiting"
+		waiter.seat = 0
+		waiter.runtime = nil
+		c.waiting[room.ID] = waiter
+		c.mu.Unlock()
 		return nil, err
 	}
 	rt, err := c.startTableRuntime(ctx, tableID, room, waiter, second)
 	if err != nil {
+		log.Error().
+			Err(err).
+			Str("table_id", tableID).
+			Str("room_id", room.ID).
+			Str("waiter_session_id", waiter.session.ID).
+			Str("second_session_id", second.session.ID).
+			Str("waiter_agent_id", waiter.agent.ID).
+			Str("second_agent_id", second.agent.ID).
+			Msg("start table runtime failed")
 		return nil, err
 	}
 	c.mu.Lock()
@@ -155,11 +187,15 @@ func (c *Coordinator) CreateSession(ctx context.Context, req CreateSessionReques
 }
 
 func (c *Coordinator) CloseSession(ctx context.Context, sessionID string) error {
+	return c.CloseSessionWithReason(ctx, sessionID, "client_closed")
+}
+
+func (c *Coordinator) CloseSessionWithReason(ctx context.Context, sessionID, reason string) error {
 	c.mu.Lock()
 	sess := c.sessions[sessionID]
 	if sess != nil {
 		if sess.buffer != nil {
-			sess.buffer.Append("session_closed", sessionID, map[string]any{"reason": "client_closed"})
+			sess.buffer.Append("session_closed", sessionID, map[string]any{"reason": reason})
 			sess.buffer.Close()
 		}
 		delete(c.sessions, sessionID)
@@ -174,6 +210,25 @@ func (c *Coordinator) CloseSession(ctx context.Context, sessionID string) error 
 	return c.store.CloseAgentSession(ctx, sessionID)
 }
 
+func (c *Coordinator) expireSessions(ctx context.Context, now time.Time) int {
+	expired := make([]string, 0)
+	c.mu.Lock()
+	for id, sess := range c.sessions {
+		if sess.session.Status == "closed" {
+			continue
+		}
+		if !sess.session.ExpiresAt.IsZero() && sess.session.ExpiresAt.Before(now) {
+			expired = append(expired, id)
+		}
+	}
+	c.mu.Unlock()
+
+	for _, id := range expired {
+		_ = c.CloseSessionWithReason(ctx, id, "expired")
+	}
+	return len(expired)
+}
+
 func (c *Coordinator) FindTableByAgent(agentID string) (string, string, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -182,6 +237,24 @@ func (c *Coordinator) FindTableByAgent(agentID string) (string, string, bool) {
 		return "", "", false
 	}
 	return sess.session.TableID, sess.session.RoomID, true
+}
+
+func (c *Coordinator) FindOpenSessionByAgent(agentID string) (*CreateSessionResponse, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	sess := c.byAgent[agentID]
+	if sess == nil || sess.session.Status == "closed" {
+		return nil, false
+	}
+	res := &CreateSessionResponse{
+		SessionID: sess.session.ID,
+		TableID:   sess.session.TableID,
+		RoomID:    sess.session.RoomID,
+		SeatID:    sess.session.SeatID,
+		StreamURL: "/api/agent/sessions/" + sess.session.ID + "/events",
+		ExpiresAt: sess.session.ExpiresAt,
+	}
+	return res, true
 }
 
 func (c *Coordinator) startTableRuntime(ctx context.Context, tableID string, room *store.Room, p0, p1 *sessionState) (*tableRuntime, error) {

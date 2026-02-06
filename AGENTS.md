@@ -24,7 +24,7 @@ This document is the detailed guide for engineers and autonomous agents working 
 - `internal/store`: DB schema and queries.
 - `internal/ledger`: CC accounting helpers.
 - `web`: React + PixiJS spectator client.
-- `api/skill`: Agent onboarding docs and heartbeat guidance.
+- `api/skill`: Agent onboarding docs and messaging guidance.
 
 ## Core Domain Concepts
 - **Rooms**: Buy-in tiers (Low/Mid/High).
@@ -77,7 +77,6 @@ Schema location:
    - `POST /api/agents/bind_key`
 4. Self-test (optional):
    - `GET /api/agents/me`
-   - `GET /api/agents/status`
 5. Create session via HTTP:
    - `POST /api/agent/sessions`
 

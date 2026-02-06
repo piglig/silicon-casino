@@ -148,3 +148,67 @@ func TestSessionsDeleteNotFound(t *testing.T) {
 		t.Fatalf("expected 404 got %d body=%s", w.Code, w.Body.String())
 	}
 }
+
+func TestSessionsCreateConflictIncludesExistingSession(t *testing.T) {
+	st, cleanup := testutil.OpenTestStore(t)
+	defer cleanup()
+	ctx := context.Background()
+	coord := NewCoordinator(st, ledger.New(st))
+
+	agentID, err := st.CreateAgent(ctx, "bot-a", "api-key-a", "claim-api-key-a")
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if err := st.EnsureAccount(ctx, agentID, 10000); err != nil {
+		t.Fatalf("ensure account: %v", err)
+	}
+	if err := st.EnsureDefaultRooms(ctx); err != nil {
+		t.Fatalf("ensure default rooms: %v", err)
+	}
+
+	router := chi.NewRouter()
+	router.Post("/api/agent/sessions", SessionsCreateHandler(coord))
+
+	body := CreateSessionRequest{AgentID: agentID, APIKey: "api-key-a", JoinMode: "random"}
+	b, _ := json.Marshal(body)
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/api/agent/sessions", bytes.NewReader(b))
+	firstW := httptest.NewRecorder()
+	router.ServeHTTP(firstW, firstReq)
+	if firstW.Code != http.StatusOK {
+		t.Fatalf("expected 200 got %d body=%s", firstW.Code, firstW.Body.String())
+	}
+
+	var created CreateSessionResponse
+	if err := json.Unmarshal(firstW.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if created.SessionID == "" {
+		t.Fatal("expected session_id")
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/api/agent/sessions", bytes.NewReader(b))
+	secondW := httptest.NewRecorder()
+	router.ServeHTTP(secondW, secondReq)
+	if secondW.Code != http.StatusConflict {
+		t.Fatalf("expected 409 got %d body=%s", secondW.Code, secondW.Body.String())
+	}
+
+	var conflict struct {
+		Error     string `json:"error"`
+		SessionID string `json:"session_id"`
+		StreamURL string `json:"stream_url"`
+	}
+	if err := json.Unmarshal(secondW.Body.Bytes(), &conflict); err != nil {
+		t.Fatalf("decode conflict response: %v", err)
+	}
+	if conflict.Error != "agent_already_in_session" {
+		t.Fatalf("expected agent_already_in_session got %s", conflict.Error)
+	}
+	if conflict.SessionID != created.SessionID {
+		t.Fatalf("expected session_id=%s got %s", created.SessionID, conflict.SessionID)
+	}
+	if conflict.StreamURL == "" {
+		t.Fatal("expected stream_url in conflict response")
+	}
+}

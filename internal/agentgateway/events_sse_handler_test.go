@@ -174,3 +174,154 @@ func TestEventsSSEHeartbeatAndSessionClosed(t *testing.T) {
 		t.Fatal("expected session_closed event")
 	}
 }
+
+func TestEventsSSEHeaders(t *testing.T) {
+	coord, s1ID, _ := setupMatchedSessions(t)
+	router := chi.NewRouter()
+	router.Get("/api/agent/sessions/{session_id}/events", EventsSSEHandler(coord))
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/agent/sessions/"+s1ID+"/events", nil)
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("open sse: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
+		t.Fatalf("expected Content-Type text/event-stream, got %q", ct)
+	}
+	cc := resp.Header.Get("Cache-Control")
+	if !strings.Contains(cc, "no-cache") || !strings.Contains(cc, "no-transform") {
+		t.Fatalf("expected Cache-Control to include no-cache and no-transform, got %q", cc)
+	}
+	if v := resp.Header.Get("X-Accel-Buffering"); v != "no" {
+		t.Fatalf("expected X-Accel-Buffering no, got %q", v)
+	}
+	if v := resp.Header.Get("X-Content-Type-Options"); v != "nosniff" {
+		t.Fatalf("expected X-Content-Type-Options nosniff, got %q", v)
+	}
+}
+
+func TestEventsSSEUsesStoredOffsetWhenHeaderMissing(t *testing.T) {
+	coord, s1ID, s2ID := setupMatchedSessions(t)
+	router := chi.NewRouter()
+	router.Get("/api/agent/sessions/{session_id}/events", EventsSSEHandler(coord))
+	router.Post("/api/agent/sessions/{session_id}/actions", ActionsHandler(coord))
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/agent/sessions/"+s1ID+"/events", nil)
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("open sse: %v", err)
+	}
+	rd := bufio.NewReader(resp.Body)
+	ev1 := readEventWithTimeout(t, rd, time.Second)
+	ev2 := readEventWithTimeout(t, rd, time.Second)
+	lastSeen := ev2.ID
+	resp.Body.Close()
+
+	coord.mu.Lock()
+	rt := coord.sessions[s1ID].runtime
+	turnID := rt.turnID
+	actor := rt.engine.State.CurrentActor
+	actorSession := s1ID
+	if coord.sessions[s1ID].seat != actor {
+		actorSession = s2ID
+	}
+	coord.mu.Unlock()
+
+	req2, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/agent/sessions/"+s1ID+"/events", nil)
+	req2.Header.Set("Accept", "text/event-stream")
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatalf("open sse replay: %v", err)
+	}
+	defer resp2.Body.Close()
+
+	body := ActionRequest{RequestID: "req_offset", TurnID: turnID, Action: "call"}
+	b, _ := json.Marshal(body)
+	postReq := httptest.NewRequest(http.MethodPost, "/api/agent/sessions/"+actorSession+"/actions", bytes.NewReader(b))
+	postW := httptest.NewRecorder()
+	router.ServeHTTP(postW, postReq)
+	if postW.Code != http.StatusOK {
+		t.Fatalf("post action failed: %d %s", postW.Code, postW.Body.String())
+	}
+
+	rd2 := bufio.NewReader(resp2.Body)
+	ev := readEventWithTimeout(t, rd2, time.Second)
+	idNew, _ := strconv.Atoi(ev.ID)
+	idOld, _ := strconv.Atoi(lastSeen)
+	if !(idNew > idOld) {
+		t.Fatalf("expected event id > %s, got %s (ev1=%s)", lastSeen, ev.ID, ev1.ID)
+	}
+}
+
+func TestEventsSSEInvalidLastEventIDReplaysBuffer(t *testing.T) {
+	coord, s1ID, _ := setupMatchedSessions(t)
+	router := chi.NewRouter()
+	router.Get("/api/agent/sessions/{session_id}/events", EventsSSEHandler(coord))
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/agent/sessions/"+s1ID+"/events", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("open sse: %v", err)
+	}
+	rd := bufio.NewReader(resp.Body)
+	ev1 := readEventWithTimeout(t, rd, time.Second)
+	resp.Body.Close()
+
+	req2, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/agent/sessions/"+s1ID+"/events", nil)
+	req2.Header.Set("Last-Event-ID", "not-a-number")
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatalf("open sse replay: %v", err)
+	}
+	defer resp2.Body.Close()
+	rd2 := bufio.NewReader(resp2.Body)
+	ev2 := readEventWithTimeout(t, rd2, time.Second)
+	if ev2.ID != ev1.ID {
+		t.Fatalf("expected replay to start from first buffered event %s, got %s", ev1.ID, ev2.ID)
+	}
+}
+
+func TestSSEEventDataContract(t *testing.T) {
+	coord, s1ID, _ := setupMatchedSessions(t)
+	router := chi.NewRouter()
+	router.Get("/api/agent/sessions/{session_id}/events", EventsSSEHandler(coord))
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/agent/sessions/"+s1ID+"/events", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("open sse: %v", err)
+	}
+	defer resp.Body.Close()
+
+	rd := bufio.NewReader(resp.Body)
+	ev := readEventWithTimeout(t, rd, time.Second)
+
+	var payload struct {
+		EventID   string         `json:"event_id"`
+		Event     string         `json:"event"`
+		SessionID string         `json:"session_id"`
+		ServerTS  int64          `json:"server_ts"`
+		Data      map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(ev.Data), &payload); err != nil {
+		t.Fatalf("decode event data: %v", err)
+	}
+	if payload.EventID == "" || payload.Event == "" || payload.SessionID == "" {
+		t.Fatalf("missing required event fields: %+v", payload)
+	}
+	if payload.ServerTS == 0 {
+		t.Fatal("expected server_ts to be set")
+	}
+}

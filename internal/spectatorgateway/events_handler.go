@@ -22,12 +22,15 @@ func EventsHandler(coord *agentgateway.Coordinator) http.HandlerFunc {
 		flusher, ok := w.(http.Flusher)
 		if !ok {
 			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":"stream_not_supported"}`))
 			return
 		}
 
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
+		metricSpectatorSSEConnectionsTotal.Add(1)
+		metricSpectatorSSEConnectionsActive.Add(1)
+		defer metricSpectatorSSEConnectionsActive.Add(-1)
+
+		agentgateway.SetSSEHeaders(w)
 
 		lastEventID := r.Header.Get("Last-Event-ID")
 		replay := buf.ReplayAfter(lastEventID)

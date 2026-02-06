@@ -55,6 +55,16 @@ func TestSpectatorEventsReceiveSnapshotAndFilter(t *testing.T) {
 		t.Fatalf("open stream: %v", err)
 	}
 	defer resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
+		t.Fatalf("expected Content-Type text/event-stream, got %q", ct)
+	}
+	cc := resp.Header.Get("Cache-Control")
+	if !strings.Contains(cc, "no-cache") || !strings.Contains(cc, "no-transform") {
+		t.Fatalf("expected Cache-Control to include no-cache and no-transform, got %q", cc)
+	}
+	if v := resp.Header.Get("X-Accel-Buffering"); v != "no" {
+		t.Fatalf("expected X-Accel-Buffering no, got %q", v)
+	}
 	rd := bufio.NewReader(resp.Body)
 	ev := readSpectatorEvent(t, rd, time.Second)
 	if ev == "" {

@@ -15,3 +15,5 @@ internal/web/static
 .vscode/
 
 __debug_*
+
+*.log

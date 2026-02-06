@@ -607,6 +607,10 @@ func int4Param(v int32) pgtype.Int4 {
 	return pgtype.Int4{Int32: v, Valid: true}
 }
 
+func timestamptzParam(v time.Time) pgtype.Timestamptz {
+	return pgtype.Timestamptz{Time: v, Valid: true}
+}
+
 func int4PtrParam(v *int) pgtype.Int4 {
 	if v == nil {
 		return pgtype.Int4{}
@@ -683,6 +687,56 @@ func (s *Store) CreateAgentSession(ctx context.Context, sess AgentSession) error
 		Status:    sess.Status,
 		ExpiresAt: timeParam(&sess.ExpiresAt),
 	})
+}
+
+func (s *Store) CreateMatchedTableAndSessions(ctx context.Context, tableID, roomID string, sb, bb int64, waiterSessionID string, second AgentSession, seat0, seat1 int) error {
+	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := s.q.WithTx(tx)
+	if err := qtx.CreateTable(ctx, sqlcgen.CreateTableParams{
+		ID:           tableID,
+		RoomID:       textParam(roomID),
+		Status:       "active",
+		SmallBlindCc: sb,
+		BigBlindCc:   bb,
+	}); err != nil {
+		return err
+	}
+	if err := qtx.CreateAgentSession(ctx, sqlcgen.CreateAgentSessionParams{
+		ID:        second.ID,
+		AgentID:   second.AgentID,
+		RoomID:    second.RoomID,
+		Column4:   second.TableID,
+		SeatID:    int4Param(int32(seat1)),
+		JoinMode:  second.JoinMode,
+		Status:    second.Status,
+		ExpiresAt: timestamptzParam(second.ExpiresAt),
+	}); err != nil {
+		return err
+	}
+	if rows, err := qtx.UpdateAgentSessionMatch(ctx, sqlcgen.UpdateAgentSessionMatchParams{
+		ID:      waiterSessionID,
+		TableID: textParam(tableID),
+		SeatID:  int4Param(int32(seat0)),
+	}); err != nil {
+		return err
+	} else if rows == 0 {
+		return ErrNotFound
+	}
+	if rows, err := qtx.UpdateAgentSessionMatch(ctx, sqlcgen.UpdateAgentSessionMatchParams{
+		ID:      second.ID,
+		TableID: textParam(tableID),
+		SeatID:  int4Param(int32(seat1)),
+	}); err != nil {
+		return err
+	} else if rows == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit(ctx)
 }
 
 func (s *Store) GetAgentSession(ctx context.Context, sessionID string) (*AgentSession, error) {

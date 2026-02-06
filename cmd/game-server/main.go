@@ -4,11 +4,11 @@ import (
 	"context"
 	"bytes"
 	"encoding/json"
+	"expvar"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -60,10 +60,17 @@ func main() {
 		log.Fatal().Err(err).Msg("ensure provider rates failed")
 	}
 	agentCoord := agentgateway.NewCoordinator(st, led)
+	agentCoord.StartJanitor(context.Background(), time.Minute)
 	r := newRouter(st, cfg, agentCoord)
 	logRoutes(r)
 
-	server := &http.Server{Addr: cfg.HTTPAddr, Handler: r, ReadHeaderTimeout: 5 * time.Second}
+	server := &http.Server{
+		Addr:              cfg.HTTPAddr,
+		Handler:           r,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 	log.Info().Str("addr", cfg.HTTPAddr).Msg("http listening")
 	log.Fatal().Err(server.ListenAndServe()).Msg("server stopped")
 }
@@ -106,6 +113,7 @@ func newRouter(st *store.Store, cfg config.ServerConfig, agentCoord *agentgatewa
 			r.Get("/ledger", ledgerHandler(st))
 			r.Post("/topup", topupHandler(st))
 			r.Post("/rooms", roomsHandler(st))
+			r.Get("/debug/vars", expvar.Handler().ServeHTTP)
 			r.MethodFunc(http.MethodGet, "/providers/rates", providerRatesHandler(st))
 			r.MethodFunc(http.MethodPost, "/providers/rates", providerRatesHandler(st))
 		})
@@ -113,7 +121,6 @@ func newRouter(st *store.Store, cfg config.ServerConfig, agentCoord *agentgatewa
 
 	skillServer := http.StripPrefix("/api", http.FileServer(http.Dir(filepath.Join("api", "skill"))))
 	r.Handle("/api/skill.md", skillServer)
-	r.Handle("/api/heartbeat.md", skillServer)
 	r.Handle("/api/messaging.md", skillServer)
 	r.Handle("/api/skill.json", skillServer)
 
@@ -126,7 +133,7 @@ func newRouter(st *store.Store, cfg config.ServerConfig, agentCoord *agentgatewa
 
 func apiLogMiddleware() func(http.Handler) http.Handler {
 	return httplog.RequestLogger(
-		slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{})),
+		slog.New(slog.NewJSONHandler(logging.Writer(), &slog.HandlerOptions{})),
 		&httplog.Options{
 			Level:           slog.LevelInfo,
 			Schema:          httplog.Schema{ResponseStatus: "status", ResponseDuration: "duration_ms"},
@@ -154,6 +161,10 @@ func apiLogMiddleware() func(http.Handler) http.Handler {
 func bodyCaptureMiddleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if isSSERequest(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			reqBody, err := io.ReadAll(r.Body)
 			if err != nil {
 				reqBody = nil
@@ -183,6 +194,12 @@ func (c *captureWriter) Write(p []byte) (int, error) {
 	return c.ResponseWriter.Write(p)
 }
 
+func (c *captureWriter) Flush() {
+	if f, ok := c.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 func parseMaybeJSON(b []byte) any {
 	if len(b) == 0 {
 		return ""
@@ -192,6 +209,26 @@ func parseMaybeJSON(b []byte) any {
 		return out
 	}
 	return string(b)
+}
+
+func writeHTTPError(w http.ResponseWriter, status int, code string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": code})
+}
+
+func isSSERequest(r *http.Request) bool {
+	if strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
+		return true
+	}
+	path := r.URL.Path
+	if strings.HasSuffix(path, "/events") && strings.Contains(path, "/api/agent/sessions/") {
+		return true
+	}
+	if path == "/api/public/spectate/events" {
+		return true
+	}
+	return false
 }
 
 func logRoutes(r chi.Router) {
@@ -273,7 +310,7 @@ func agentsHandler(st *store.Store) http.HandlerFunc {
 		limit, offset := parsePagination(r)
 		items, err := st.ListAgents(r.Context(), limit, offset)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
+			writeHTTPError(w, http.StatusInternalServerError, "internal_error")
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -303,7 +340,7 @@ func ledgerHandler(st *store.Store) http.HandlerFunc {
 		}
 		items, err := st.ListLedgerEntries(r.Context(), f, limit, offset)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
+			writeHTTPError(w, http.StatusInternalServerError, "internal_error")
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -317,7 +354,7 @@ func ledgerHandler(st *store.Store) http.HandlerFunc {
 func topupHandler(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusMethodNotAllowed)
+			writeHTTPError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 			return
 		}
 		var body struct {
@@ -325,17 +362,17 @@ func topupHandler(st *store.Store) http.HandlerFunc {
 			AmountCC int64  `json:"amount_cc"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
+			writeHTTPError(w, http.StatusBadRequest, "invalid_json")
 			return
 		}
 		if body.AgentID == "" || body.AmountCC <= 0 {
-			w.WriteHeader(http.StatusBadRequest)
+			writeHTTPError(w, http.StatusBadRequest, "invalid_request")
 			return
 		}
 		refID := strconv.FormatInt(time.Now().UnixNano(), 10)
 		bal, err := st.Credit(r.Context(), body.AgentID, body.AmountCC, "topup_credit", "topup", refID)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
+			writeHTTPError(w, http.StatusInternalServerError, "internal_error")
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "balance_cc": bal})
@@ -348,7 +385,7 @@ func roomsHandler(st *store.Store) http.HandlerFunc {
 		case http.MethodGet:
 			items, err := st.ListRooms(r.Context())
 			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
+				writeHTTPError(w, http.StatusInternalServerError, "internal_error")
 				return
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
@@ -360,21 +397,21 @@ func roomsHandler(st *store.Store) http.HandlerFunc {
 				BigBlind   int64  `json:"big_blind_cc"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				w.WriteHeader(http.StatusBadRequest)
+				writeHTTPError(w, http.StatusBadRequest, "invalid_json")
 				return
 			}
 			if body.Name == "" || body.MinBuyinCC <= 0 || body.SmallBlind <= 0 || body.BigBlind <= 0 {
-				w.WriteHeader(http.StatusBadRequest)
+				writeHTTPError(w, http.StatusBadRequest, "invalid_request")
 				return
 			}
 			id, err := st.CreateRoom(r.Context(), body.Name, body.MinBuyinCC, body.SmallBlind, body.BigBlind)
 			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
+				writeHTTPError(w, http.StatusInternalServerError, "internal_error")
 				return
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "room_id": id})
 		default:
-			w.WriteHeader(http.StatusMethodNotAllowed)
+			writeHTTPError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		}
 	}
 }
@@ -385,7 +422,7 @@ func providerRatesHandler(st *store.Store) http.HandlerFunc {
 		case http.MethodGet:
 			items, err := st.ListProviderRates(r.Context())
 			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
+				writeHTTPError(w, http.StatusInternalServerError, "internal_error")
 				return
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
@@ -397,21 +434,21 @@ func providerRatesHandler(st *store.Store) http.HandlerFunc {
 				Weight              float64 `json:"weight"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				w.WriteHeader(http.StatusBadRequest)
+				writeHTTPError(w, http.StatusBadRequest, "invalid_json")
 				return
 			}
 			body.Provider = strings.ToLower(strings.TrimSpace(body.Provider))
 			if body.Provider == "" || body.PricePer1KTokensUSD <= 0 || body.CCPerUSD <= 0 || body.Weight <= 0 {
-				w.WriteHeader(http.StatusBadRequest)
+				writeHTTPError(w, http.StatusBadRequest, "invalid_request")
 				return
 			}
 			if err := st.UpsertProviderRate(r.Context(), body.Provider, body.PricePer1KTokensUSD, body.CCPerUSD, body.Weight); err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
+				writeHTTPError(w, http.StatusInternalServerError, "internal_error")
 				return
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 		default:
-			w.WriteHeader(http.StatusMethodNotAllowed)
+			writeHTTPError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		}
 	}
 }
@@ -420,7 +457,7 @@ func publicRoomsHandler(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		items, err := st.ListRooms(r.Context())
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
+			writeHTTPError(w, http.StatusInternalServerError, "internal_error")
 			return
 		}
 		// public subset
@@ -444,7 +481,7 @@ func publicTablesHandler(st *store.Store) http.HandlerFunc {
 		limit, offset := parsePagination(r)
 		items, err := st.ListTables(r.Context(), roomID, limit, offset)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
+			writeHTTPError(w, http.StatusInternalServerError, "internal_error")
 			return
 		}
 		out := make([]map[string]any, 0, len(items))
@@ -470,12 +507,12 @@ func publicAgentTableHandler(coord *agentgateway.Coordinator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentID := r.URL.Query().Get("agent_id")
 		if agentID == "" {
-			w.WriteHeader(http.StatusBadRequest)
+			writeHTTPError(w, http.StatusBadRequest, "invalid_request")
 			return
 		}
 		tableID, roomID, ok := coord.FindTableByAgent(agentID)
 		if !ok {
-			w.WriteHeader(http.StatusNotFound)
+			writeHTTPError(w, http.StatusNotFound, "table_not_found")
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -491,7 +528,7 @@ func publicLeaderboardHandler(st *store.Store) http.HandlerFunc {
 		limit, offset := parsePagination(r)
 		items, err := st.ListLeaderboard(r.Context(), limit, offset)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
+			writeHTTPError(w, http.StatusInternalServerError, "internal_error")
 			return
 		}
 		out := make([]map[string]any, 0, len(items))
@@ -513,7 +550,7 @@ func publicLeaderboardHandler(st *store.Store) http.HandlerFunc {
 func registerAgentHandler(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusMethodNotAllowed)
+			writeHTTPError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 			return
 		}
 		var body struct {
@@ -521,18 +558,18 @@ func registerAgentHandler(st *store.Store) http.HandlerFunc {
 			Description string `json:"description"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
+			writeHTTPError(w, http.StatusBadRequest, "invalid_json")
 			return
 		}
 		if body.Name == "" {
-			w.WriteHeader(http.StatusBadRequest)
+			writeHTTPError(w, http.StatusBadRequest, "invalid_request")
 			return
 		}
 		apiKey := "apa_" + strconv.FormatInt(time.Now().UnixNano(), 10)
 		claimCode := "apa_claim_" + strconv.FormatInt(time.Now().UnixNano(), 10)
 		id, err := st.CreateAgent(r.Context(), body.Name, apiKey, claimCode)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
+			writeHTTPError(w, http.StatusInternalServerError, "internal_error")
 			return
 		}
 		_ = st.EnsureAccount(r.Context(), id, 10000)
@@ -554,7 +591,7 @@ func agentMeHandler(st *store.Store) http.HandlerFunc {
 		agent := r.Context().Value(agentContextKey{}).(*store.Agent)
 		balance, err := st.GetAccountBalance(r.Context(), agent.ID)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
+			writeHTTPError(w, http.StatusInternalServerError, "internal_error")
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -570,7 +607,7 @@ func agentMeHandler(st *store.Store) http.HandlerFunc {
 func claimAgentHandler(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusMethodNotAllowed)
+			writeHTTPError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 			return
 		}
 		var body struct {
@@ -578,16 +615,16 @@ func claimAgentHandler(st *store.Store) http.HandlerFunc {
 			ClaimCode string `json:"claim_code"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
+			writeHTTPError(w, http.StatusBadRequest, "invalid_json")
 			return
 		}
 		claim, err := st.GetAgentClaimByAgent(r.Context(), body.AgentID)
 		if err != nil || claim.ClaimCode != body.ClaimCode {
-			w.WriteHeader(http.StatusUnauthorized)
+			writeHTTPError(w, http.StatusUnauthorized, "invalid_claim")
 			return
 		}
 		if err := st.MarkAgentClaimed(r.Context(), body.AgentID); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
+			writeHTTPError(w, http.StatusInternalServerError, "internal_error")
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
@@ -598,17 +635,17 @@ func claimByCodeHandler(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claimCode := chi.URLParam(r, "claim_code")
 		if claimCode == "" {
-			w.WriteHeader(http.StatusBadRequest)
+			writeHTTPError(w, http.StatusBadRequest, "invalid_request")
 			return
 		}
 		claim, err := st.GetAgentClaimByCode(r.Context(), claimCode)
 		if err != nil {
-			w.WriteHeader(http.StatusNotFound)
+			writeHTTPError(w, http.StatusNotFound, "claim_not_found")
 			return
 		}
 		if claim.Status != "claimed" {
 			if err := st.MarkAgentClaimed(r.Context(), claim.AgentID); err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
+				writeHTTPError(w, http.StatusInternalServerError, "internal_error")
 				return
 			}
 			claim.Status = "claimed"
@@ -624,7 +661,7 @@ func claimByCodeHandler(st *store.Store) http.HandlerFunc {
 func bindKeyHandler(st *store.Store, cfg config.ServerConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusMethodNotAllowed)
+			writeHTTPError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 			return
 		}
 		var body struct {
@@ -633,29 +670,26 @@ func bindKeyHandler(st *store.Store, cfg config.ServerConfig) http.HandlerFunc {
 			BudgetUSD float64 `json:"budget_usd"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
+			writeHTTPError(w, http.StatusBadRequest, "invalid_json")
 			return
 		}
 		agent := r.Context().Value(agentContextKey{}).(*store.Agent)
 		body.Provider = strings.ToLower(strings.TrimSpace(body.Provider))
 		if body.Provider == "" || body.APIKey == "" || body.BudgetUSD <= 0 {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]any{"error": "invalid_request"})
+			writeHTTPError(w, http.StatusBadRequest, "invalid_request")
 			return
 		}
 		if body.BudgetUSD > cfg.MaxBudgetUSD {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]any{"error": "budget_exceeds_limit"})
+			writeHTTPError(w, http.StatusBadRequest, "budget_exceeds_limit")
 			return
 		}
 		if body.Provider != "openai" && body.Provider != "kimi" {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]any{"error": "invalid_provider"})
+			writeHTTPError(w, http.StatusBadRequest, "invalid_provider")
 			return
 		}
 
 		if blocked, reason, err := st.IsAgentBlacklisted(r.Context(), agent.ID); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
+			writeHTTPError(w, http.StatusInternalServerError, "internal_error")
 			return
 		} else if blocked {
 			w.WriteHeader(http.StatusForbidden)
@@ -664,24 +698,22 @@ func bindKeyHandler(st *store.Store, cfg config.ServerConfig) http.HandlerFunc {
 		}
 
 		if last, err := st.LastSuccessfulKeyBindAt(r.Context(), agent.ID); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
+			writeHTTPError(w, http.StatusInternalServerError, "internal_error")
 			return
 		} else if last != nil {
 			cooldown := time.Duration(cfg.BindCooldownMins) * time.Minute
 			if time.Since(*last) < cooldown {
-				w.WriteHeader(http.StatusTooManyRequests)
-				_ = json.NewEncoder(w).Encode(map[string]any{"error": "cooldown_active"})
+				writeHTTPError(w, http.StatusTooManyRequests, "cooldown_active")
 				return
 			}
 		}
 
 		keyHash := store.HashAPIKey(body.APIKey)
 		if existing, err := st.GetAgentKeyByHash(r.Context(), keyHash); err == nil && existing != nil {
-			w.WriteHeader(http.StatusConflict)
-			_ = json.NewEncoder(w).Encode(map[string]any{"error": "api_key_already_bound"})
+			writeHTTPError(w, http.StatusConflict, "api_key_already_bound")
 			return
 		} else if err != nil && err != store.ErrNotFound {
-			w.WriteHeader(http.StatusInternalServerError)
+			writeHTTPError(w, http.StatusInternalServerError, "internal_error")
 			return
 		}
 
@@ -694,36 +726,32 @@ func bindKeyHandler(st *store.Store, cfg config.ServerConfig) http.HandlerFunc {
 					_ = json.NewEncoder(w).Encode(map[string]any{"error": "agent_blacklisted"})
 					return
 				}
-				w.WriteHeader(http.StatusUnauthorized)
-				_ = json.NewEncoder(w).Encode(map[string]any{"error": "invalid_vendor_key"})
+				writeHTTPError(w, http.StatusUnauthorized, "invalid_vendor_key")
 				return
 			}
 		}
 
 		rate, err := st.GetProviderRate(r.Context(), body.Provider)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]any{"error": "invalid_provider"})
+			writeHTTPError(w, http.StatusBadRequest, "invalid_provider")
 			return
 		}
 		credit := store.ComputeCCFromBudgetUSD(body.BudgetUSD, rate.CCPerUSD, rate.Weight)
 		if credit <= 0 {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]any{"error": "invalid_request"})
+			writeHTTPError(w, http.StatusBadRequest, "invalid_request")
 			return
 		}
 
 		keyID, err := st.CreateAgentKey(r.Context(), agent.ID, body.Provider, keyHash)
 		if err != nil {
-			w.WriteHeader(http.StatusConflict)
-			_ = json.NewEncoder(w).Encode(map[string]any{"error": "api_key_already_bound"})
+			writeHTTPError(w, http.StatusConflict, "api_key_already_bound")
 			return
 		}
 		_ = st.RecordAgentKeyAttempt(r.Context(), agent.ID, body.Provider, "success")
 		_ = st.EnsureAccount(r.Context(), agent.ID, 0)
 		newBal, err := st.Credit(r.Context(), agent.ID, credit, "key_credit", "agent_key", keyID)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
+			writeHTTPError(w, http.StatusInternalServerError, "internal_error")
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -762,21 +790,33 @@ func verifyVendorKey(ctx context.Context, cfg config.ServerConfig, provider, api
 	if provider == "kimi" {
 		base = cfg.KimiBaseURL
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+"/models", nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
 	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
+	url := strings.TrimRight(base, "/") + "/models"
+	for attempt := 0; attempt < 2; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+		resp, err := client.Do(req)
+		if err != nil {
+			if attempt == 0 && ctx.Err() == nil {
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
+			return err
+		}
+		resp.Body.Close()
+		if resp.StatusCode >= 500 && attempt == 0 {
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		if resp.StatusCode >= 400 {
+			return fmt.Errorf("invalid_vendor_key")
+		}
+		return nil
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("invalid_vendor_key")
-	}
-	return nil
+	return fmt.Errorf("invalid_vendor_key")
 }
 
 func adminAuthMiddleware(adminKey string) func(http.Handler) http.Handler {

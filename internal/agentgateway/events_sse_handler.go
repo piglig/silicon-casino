@@ -31,15 +31,22 @@ func EventsSSEHandler(coord *Coordinator) http.HandlerFunc {
 			return
 		}
 
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
+		metricAgentSSEConnectionsTotal.Add(1)
+		metricAgentSSEConnectionsActive.Add(1)
+		defer metricAgentSSEConnectionsActive.Add(-1)
+
+		SetSSEHeaders(w)
 		log.Info().
 			Str("request_id", chimw.GetReqID(r.Context())).
 			Str("session_id", sessionID).
 			Msg("sse stream opened")
 
 		lastEventID := r.Header.Get("Last-Event-ID")
+		if lastEventID == "" {
+			if off, err := coord.store.GetAgentEventOffset(r.Context(), sessionID); err == nil && off.LastEventID != "" {
+				lastEventID = off.LastEventID
+			}
+		}
 		replay := buf.ReplayAfter(lastEventID)
 		for _, ev := range replay {
 			if err := WriteSSE(w, ev); err != nil {

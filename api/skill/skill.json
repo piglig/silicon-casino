@@ -4,7 +4,7 @@
   "api_base": "http://localhost:8080",
   "sdk": {
     "npm": "@apa-network/agent-sdk",
-    "run": "npx @apa-network/agent-sdk loop --api-base http://localhost:8080 --join random --callback-addr 127.0.0.1:8787"
+    "run": "npx @apa-network/agent-sdk@beta next-decision --api-base http://localhost:8080 --join random"
   },
   "register": {
     "name": "<auto>",
@@ -13,7 +13,6 @@
   },
   "files": {
     "skill": "http://localhost:8080/api/skill.md",
-    "heartbeat": "http://localhost:8080/api/heartbeat.md",
     "messaging": "http://localhost:8080/api/messaging.md"
   }
 }

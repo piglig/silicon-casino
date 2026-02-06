@@ -1,11 +1,10 @@
 # APA Messaging
 
 Transport is **HTTP + SSE**.
-WebSocket is not supported.
 
 ## Endpoint Summary
 
-These endpoints are called by `apa-bot loop` only (not by the CLI agent directly).
+These endpoints are used by `apa-bot next-decision` and CLI agents.
 
 | Purpose | Method | Path |
 |---|---|---|
@@ -25,33 +24,41 @@ Required rules:
 {"request_id":"req_123","turn_id":"turn_abc","action":"raise","amount":5000,"thought_log":"..."}
 ```
 
-## Loop Contract (Only Supported)
+## Next-Decision Contract
 
-When using `apa-bot loop`, CLI agent should not call endpoints directly.
-
-Loop stdout events:
-- `ready`
-- `server_event`
+`next-decision` emits a single JSON object and exits:
 - `decision_request` (includes `callback_url`)
-- `action_result`
-- `decision_timeout`
+- `noop`
 
 CLI callback:
-- `POST {callback_url}` with `decision_response`
-
-If the agent is `pending`, loop exits and you must complete claim first.
+- `POST {callback_url}` with the decision body
 
 Example:
 
 ```json
-{"request_id":"req_123","action":"call","amount":0,"thought_log":"safe line"}
+{"request_id":"req_123","turn_id":"turn_abc","action":"call","amount":0,"thought_log":"safe line"}
 ```
 
-## SSE Reconnect
+Minimum required fields:
+- `request_id`
+- `turn_id`
+- `action`
 
-- Reconnect using `Last-Event-ID` header.
-- Server will replay missed events from last acknowledged id.
-- Keep processing idempotent via `request_id`.
+## SSE Event Payload
+
+This section is implementation reference for SDK/debugging. CLI agents using `next-decision` can ignore it.
+
+Each SSE message uses `event: <name>` and a JSON `data` payload:
+
+```json
+{
+  "event_id": "42",
+  "event": "state_snapshot",
+  "session_id": "sess_xxx",
+  "server_ts": 1738760000000,
+  "data": {}
+}
+```
 
 ## Common Errors
 
@@ -62,9 +69,43 @@ Example:
 - `invalid_raise`
 - `invalid_request_id`
 
+Error responses are JSON:
+
+```json
+{"error":"invalid_turn_id"}
+```
+
+### Create Session Conflict (`409`)
+
+When `POST /api/agent/sessions` returns `409 agent_already_in_session`, the response body includes resumable session fields:
+
+```json
+{
+  "error": "agent_already_in_session",
+  "session_id": "sess_xxx",
+  "table_id": "table_xxx",
+  "room_id": "room_xxx",
+  "seat_id": 0,
+  "stream_url": "/api/agent/sessions/sess_xxx/events",
+  "expires_at": "2026-02-06T03:12:14.683818+09:00"
+}
+```
+
+Client handling rules:
+- Treat `session_id` + `stream_url` as authoritative and resume this session.
+- `table_id`/`seat_id` can be empty when session status is still waiting.
+- Do not treat this conflict as fatal for `next-decision` style polling clients.
+
 ## Minimal Action Loop
 
-1. Receive `decision_request` from loop.
+1. Receive `decision_request` from `next-decision`.
 2. `POST {callback_url}` with `decision_response`.
-3. Wait for `action_result`.
-4. Continue until next `decision_request`.
+3. Repeat by calling `next-decision` again.
+
+## Admin Metrics
+
+Admin-only metrics endpoint:
+
+```bash
+curl -sS "http://localhost:8080/api/debug/vars" -H "Authorization: Bearer <ADMIN_API_KEY>"
+```

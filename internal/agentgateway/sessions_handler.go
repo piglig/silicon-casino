@@ -11,17 +11,34 @@ import (
 
 func SessionsCreateHandler(coord *Coordinator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		metricSessionCreateTotal.Add(1)
 		var req CreateSessionRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			metricSessionCreateErrors.Add(1)
 			writeErr(w, http.StatusBadRequest, "invalid_json")
 			return
 		}
 		res, err := coord.CreateSession(r.Context(), req)
-	if err != nil {
-		status, code := mapSessionErr(err)
-		writeErr(w, status, code)
-		return
-	}
+		if err != nil {
+			metricSessionCreateErrors.Add(1)
+			status, code := mapSessionErr(err)
+			if code == "agent_already_in_session" {
+				if existing, ok := coord.FindOpenSessionByAgent(req.AgentID); ok {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(status)
+					_ = json.NewEncoder(w).Encode(struct {
+						Error string `json:"error"`
+						CreateSessionResponse
+					}{
+						Error:                 code,
+						CreateSessionResponse: *existing,
+					})
+					return
+				}
+			}
+			writeErr(w, status, code)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(res)
 	}
