@@ -31,6 +31,12 @@ func TestStateEndpoint(t *testing.T) {
 	if _, ok := state["community_cards"]; !ok {
 		t.Fatalf("state missing community_cards")
 	}
+	if _, ok := state["legal_actions"]; !ok {
+		t.Fatalf("state missing legal_actions")
+	}
+	if _, ok := state["action_constraints"]; !ok {
+		t.Fatalf("state missing action_constraints")
+	}
 	seatsAny, ok := state["seats"].([]any)
 	if !ok || len(seatsAny) != 2 {
 		t.Fatalf("expected 2 seats, got %#v", state["seats"])

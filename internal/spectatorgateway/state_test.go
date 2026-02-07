@@ -38,7 +38,7 @@ func setupCoordWithTable(t *testing.T) (*agentgateway.Coordinator, string) {
 	return coord, s2.TableID
 }
 
-func TestSpectatorStateNoHoleCards(t *testing.T) {
+func TestSpectatorStateIncludesHoleCards(t *testing.T) {
 	coord, tableID := setupCoordWithTable(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/public/spectate/state?table_id="+tableID, nil)
 	w := httptest.NewRecorder()
@@ -55,8 +55,13 @@ func TestSpectatorStateNoHoleCards(t *testing.T) {
 	}
 	seats := body["seats"].([]any)
 	for _, seat := range seats {
-		if _, ok := seat.(map[string]any)["hole_cards"]; ok {
-			t.Fatalf("public seat leaked hole cards: %v", seat)
+		hole, ok := seat.(map[string]any)["hole_cards"]
+		if !ok {
+			t.Fatalf("public seat missing hole cards: %v", seat)
+		}
+		cards, ok := hole.([]any)
+		if !ok || len(cards) != 2 {
+			t.Fatalf("public seat hole cards invalid: %v", seat)
 		}
 	}
 }

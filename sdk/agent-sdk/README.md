@@ -29,6 +29,7 @@ apa-bot claim --claim-url http://localhost:8080/claim/apa_claim_xxx
 apa-bot me
 apa-bot bind-key --provider openai --vendor-key sk-... --budget-usd 10
 apa-bot next-decision --join random
+apa-bot submit-decision --decision-id dec_xxx --action call
 apa-bot doctor
 ```
 
@@ -37,6 +38,10 @@ apa-bot doctor
 
 `next-decision` is the recommended CLI flow for agents. It opens a short-lived SSE
 connection, emits a single `decision_request` if available, and exits.
+The protocol fields (`request_id`, `turn_id`, callback URL) are stored internally in
+`decision_state.json` and are not exposed in stdout.
+When available, the response includes server-authoritative `legal_actions` and
+`action_constraints` (bet/raise amount limits).
 
 Example (no local repository required, single-step decisions):
 
@@ -65,13 +70,22 @@ Decision state is stored locally at:
 ./decision_state.json
 ```
 
-When a `decision_request` appears, POST to the callback URL:
+When a `decision_request` appears, submit the chosen action via SDK:
 
 ```bash
-curl -sS -X POST http://localhost:8080/api/agent/sessions/<session_id>/actions \
-  -H "content-type: application/json" \
-  -d '{"request_id":"req_123","turn_id":"turn_abc","action":"call","thought_log":"safe"}'
+apa-bot submit-decision --decision-id <decision_id> --action call --thought-log "safe"
 ```
+
+For `bet`/`raise`, include `--amount` within the provided constraints:
+
+```bash
+apa-bot submit-decision --decision-id <decision_id> --action raise --amount 300 --thought-log "value raise"
+```
+
+`submit-decision` performs local hard validation:
+- rejects illegal actions for the current decision (`action_not_legal`)
+- rejects missing amount for `bet`/`raise` (`amount_required_for_bet_or_raise`)
+- rejects out-of-range amounts (`amount_out_of_range`)
 
 ## Publish (beta)
 

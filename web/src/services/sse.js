@@ -60,7 +60,7 @@ export class SpectateSSE {
       this._scheduleReconnect()
     }
 
-    source.onmessage = (ev) => {
+    const handleEnvelope = (ev) => {
       if (!this.onMessage) return
       try {
         const envelope = JSON.parse(ev.data)
@@ -75,19 +75,23 @@ export class SpectateSSE {
             player_seat: envelope.data?.player_seat,
             action: envelope.data?.action,
             amount: envelope.data?.amount || 0,
-            thought_log: '',
+            thought_log: envelope.data?.thought_log || '',
             event: envelope.data?.event || 'action'
           })
           return
         }
         if (evt === 'hand_end') {
           this.onMessage({ type: 'hand_end', ...envelope.data })
-          return
         }
       } catch (err) {
         this.onMessage({ type: 'parse_error', error: err?.message || 'parse_error' })
       }
     }
+
+    source.addEventListener('table_snapshot', handleEnvelope)
+    source.addEventListener('action_log', handleEnvelope)
+    source.addEventListener('hand_end', handleEnvelope)
+    source.addEventListener('message', handleEnvelope)
   }
 
   _scheduleReconnect() {

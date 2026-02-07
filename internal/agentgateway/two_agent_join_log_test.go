@@ -76,6 +76,38 @@ func TestTwoAgentsJoinRoomAndEmitExpectedEvents(t *testing.T) {
 			t.Fatalf("expected non-empty event id for event=%s data=%s", ev.Event, ev.Data)
 		}
 	}
+
+	foundTurnStarted := false
+	for _, ev := range append(events1, events2...) {
+		if ev.Event != "turn_started" {
+			continue
+		}
+		foundTurnStarted = true
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(ev.Data), &payload); err != nil {
+			t.Fatalf("decode turn_started payload: %v", err)
+		}
+		actionsAny, ok := payload["allowed_actions"].([]any)
+		if !ok {
+			t.Fatalf("turn_started missing allowed_actions: %v", payload)
+		}
+		actions := make([]string, 0, len(actionsAny))
+		for _, v := range actionsAny {
+			s, ok := v.(string)
+			if ok {
+				actions = append(actions, s)
+			}
+		}
+		if containsAction(actions, "check") || containsAction(actions, "bet") {
+			t.Fatalf("preflop opening action set should not include check/bet: %+v", actions)
+		}
+		if !containsAction(actions, "fold") || !containsAction(actions, "call") || !containsAction(actions, "raise") {
+			t.Fatalf("preflop opening action set missing expected actions: %+v", actions)
+		}
+	}
+	if !foundTurnStarted {
+		t.Fatal("expected at least one turn_started event")
+	}
 }
 
 func createSessionForTest(t *testing.T, baseURL string, reqBody CreateSessionRequest) CreateSessionResponse {
@@ -166,4 +198,13 @@ func assertContainsInOrder(t *testing.T, got []string, expected []string) {
 		}
 	}
 	t.Fatalf("event order mismatch: got=%v expected(in order)=%v", got, expected)
+}
+
+func containsAction(actions []string, target string) bool {
+	for _, action := range actions {
+		if action == target {
+			return true
+		}
+	}
+	return false
 }

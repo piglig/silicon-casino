@@ -7,6 +7,19 @@ export type DecisionState = {
   stream_url?: string;
   last_event_id?: string;
   last_turn_id?: string;
+  pending_decision?: {
+    decision_id: string;
+    session_id: string;
+    request_id: string;
+    turn_id: string;
+    callback_url: string;
+    legal_actions?: string[];
+    action_constraints?: {
+      bet?: { min: number; max: number };
+      raise?: { min_to: number; max_to: number };
+    };
+    created_at: string;
+  };
   updated_at?: string;
 };
 

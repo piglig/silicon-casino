@@ -1,4 +1,4 @@
-import { APAHttpClient } from "./http/client.js";
+import { APAHttpClient, type APAClientError } from "./http/client.js";
 import { resolveApiBase, requireArg } from "./utils/config.js";
 import { loadCredential, saveCredential } from "./loop/credentials.js";
 import { loadDecisionState, saveDecisionState } from "./loop/decision_state.js";
@@ -62,6 +62,8 @@ function printHelp(): void {
   apa-bot bind-key --provider <openai|kimi> --vendor-key <key> --budget-usd <num> [--api-base <url>]
   apa-bot next-decision --join <random|select> [--room-id <id>]
                        [--timeout-ms <ms>] [--api-base <url>]
+  apa-bot submit-decision --decision-id <id> --action <fold|check|call|raise|bet>
+                          [--amount <num>] [--thought-log <text>] [--api-base <url>]
   apa-bot doctor [--api-base <url>]
 
 Config priority: CLI args > env (API_BASE) > defaults.`);
@@ -93,6 +95,59 @@ type SseEvent = {
 
 function emit(message: Record<string, unknown>): void {
   process.stdout.write(`${JSON.stringify(message)}\n`);
+}
+
+type PendingDecision = NonNullable<Awaited<ReturnType<typeof loadDecisionState>>["pending_decision"]>;
+
+function readLegalActions(state: Record<string, unknown>): string[] {
+  const raw = state["legal_actions"];
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw as string[];
+}
+
+type ParsedActionConstraints = {
+  bet?: { min: number; max: number };
+  raise?: { min_to: number; max_to: number };
+};
+
+function readActionConstraints(state: Record<string, unknown>): ParsedActionConstraints | undefined {
+  const raw = state["action_constraints"];
+  if (!raw || typeof raw !== "object") {
+    return undefined;
+  }
+  const src = raw as Record<string, unknown>;
+  const out: ParsedActionConstraints = {};
+  const bet = src["bet"];
+  if (bet && typeof bet === "object") {
+    const b = bet as Record<string, unknown>;
+    const min = Number(b["min"]);
+    const max = Number(b["max"]);
+    if (Number.isFinite(min) && Number.isFinite(max)) {
+      out.bet = { min, max };
+    }
+  }
+  const raise = src["raise"];
+  if (raise && typeof raise === "object") {
+    const r = raise as Record<string, unknown>;
+    const minTo = Number(r["min_to"]);
+    const maxTo = Number(r["max_to"]);
+    if (Number.isFinite(minTo) && Number.isFinite(maxTo)) {
+      out.raise = { min_to: minTo, max_to: maxTo };
+    }
+  }
+  if (!out.bet && !out.raise) {
+    return undefined;
+  }
+  return out;
+}
+
+function parseAction(raw: string): "fold" | "check" | "call" | "raise" | "bet" {
+  if (raw === "fold" || raw === "check" || raw === "call" || raw === "raise" || raw === "bet") {
+    return raw;
+  }
+  throw new Error("invalid --action");
 }
 
 
@@ -291,6 +346,7 @@ async function runNextDecision(args: ArgMap): Promise<void> {
 
   let decided = false;
   let newLastEventId = lastEventId;
+  let pendingDecision: PendingDecision | undefined;
 
   try {
     newLastEventId = await parseSSEOnce(streamURL, lastEventId, timeoutMs, async (evt) => {
@@ -304,7 +360,13 @@ async function runNextDecision(args: ArgMap): Promise<void> {
       const data = envelope?.data || {};
 
       if (evType === "session_closed") {
-        await saveDecisionState({ session_id: "", stream_url: "", last_event_id: "", last_turn_id: "" });
+        await saveDecisionState({
+          session_id: "",
+          stream_url: "",
+          last_event_id: "",
+          last_turn_id: "",
+          pending_decision: undefined
+        });
         emit({ type: "session_closed", session_id: sessionId });
         return true;
       }
@@ -317,15 +379,32 @@ async function runNextDecision(args: ArgMap): Promise<void> {
 
       const reqID = `req_${Date.now()}_${Math.floor(Math.random() * 1_000_000_000)}`;
       const callbackURL = `${apiBase}/agent/sessions/${sessionId}/actions`;
-      emit({
-        type: "decision_request",
-        request_id: reqID,
+      const decisionID = `dec_${Date.now()}_${Math.floor(Math.random() * 1_000_000_000)}`;
+      const legalActions = readLegalActions(data);
+      const actionConstraints = readActionConstraints(data);
+      pendingDecision = {
+        decision_id: decisionID,
         session_id: sessionId,
-        turn_id: data.turn_id,
+        request_id: reqID,
+        turn_id: String(data.turn_id || ""),
         callback_url: callbackURL,
-        legal_actions: ["fold", "check", "call", "raise", "bet"],
+        legal_actions: legalActions,
+        action_constraints: actionConstraints,
+        created_at: new Date().toISOString()
+      };
+      const payload: Record<string, unknown> = {
+        type: "decision_request",
+        decision_id: decisionID,
+        session_id: sessionId,
         state: data
-      });
+      };
+      if (legalActions.length > 0) {
+        payload.legal_actions = legalActions;
+      }
+      if (actionConstraints) {
+        payload.action_constraints = actionConstraints;
+      }
+      emit(payload);
       decided = true;
       return true;
     });
@@ -337,12 +416,85 @@ async function runNextDecision(args: ArgMap): Promise<void> {
       session_id: sessionId,
       stream_url: streamURL,
       last_event_id: newLastEventId,
-      last_turn_id: ""
+      last_turn_id: "",
+      pending_decision: pendingDecision
     });
   }
 
   if (!decided) {
     emit({ type: "noop" });
+  }
+}
+
+async function runSubmitDecision(args: ArgMap): Promise<void> {
+  const apiBase = resolveApiBase(readString(args, "api-base", "API_BASE"));
+  const decisionID = requireArg("--decision-id", readString(args, "decision-id"));
+  const action = parseAction(requireArg("--action", readString(args, "action")));
+  const thoughtLog = readString(args, "thought-log") || "";
+  const amountRaw = readString(args, "amount");
+  const amount = amountRaw ? Number(amountRaw) : undefined;
+  if (amountRaw && !Number.isFinite(amount)) {
+    throw new Error("invalid --amount");
+  }
+
+  const state = await loadDecisionState();
+  const pending = state.pending_decision;
+  if (!pending) {
+    throw new Error("pending_decision_not_found (run apa-bot next-decision)");
+  }
+  if (pending.decision_id !== decisionID) {
+    throw new Error("decision_id_mismatch (run apa-bot next-decision)");
+  }
+  const legalActions = pending.legal_actions || [];
+  if (legalActions.length > 0 && !legalActions.includes(action)) {
+    throw new Error("action_not_legal");
+  }
+  if ((action === "bet" || action === "raise") && amount === undefined) {
+    throw new Error("amount_required_for_bet_or_raise");
+  }
+  const constraints = pending.action_constraints;
+  if (action === "bet" && amount !== undefined && constraints?.bet) {
+    if (amount < constraints.bet.min || amount > constraints.bet.max) {
+      throw new Error("amount_out_of_range");
+    }
+  }
+  if (action === "raise" && amount !== undefined && constraints?.raise) {
+    if (amount < constraints.raise.min_to || amount > constraints.raise.max_to) {
+      throw new Error("amount_out_of_range");
+    }
+  }
+
+  const client = new APAHttpClient({ apiBase });
+  try {
+    const result = await client.submitAction({
+      sessionID: pending.session_id,
+      requestID: pending.request_id,
+      turnID: pending.turn_id,
+      action,
+      amount,
+      thoughtLog
+    });
+    await saveDecisionState({
+      ...state,
+      pending_decision: undefined
+    });
+    console.log(JSON.stringify(result, null, 2));
+  } catch (err) {
+    const apiErr = err as APAClientError;
+    if (apiErr?.code === "invalid_turn_id" || apiErr?.code === "not_your_turn") {
+      await saveDecisionState({
+        ...state,
+        pending_decision: undefined
+      });
+      emit({
+        type: "stale_decision",
+        decision_id: decisionID,
+        error: apiErr.code,
+        message: "decision expired; run apa-bot next-decision again"
+      });
+      return;
+    }
+    throw err;
   }
 }
 
@@ -416,6 +568,10 @@ export async function runCLI(argv: string[] = process.argv.slice(2)): Promise<vo
     }
     case "next-decision": {
       await runNextDecision(args);
+      return;
+    }
+    case "submit-decision": {
+      await runSubmitDecision(args);
       return;
     }
     default:

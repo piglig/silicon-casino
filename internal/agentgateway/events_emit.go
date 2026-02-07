@@ -15,6 +15,11 @@ func (c *Coordinator) emitTurnStarted(rt *tableRuntime) {
 		return
 	}
 	actorSeat := rt.engine.State.CurrentActor
+	allowedActions := []string{}
+	actorState := viewmodel.BuildAgentState(rt.engine.State, actorSeat, rt.turnID, false)
+	if len(actorState.LegalActions) > 0 {
+		allowedActions = actorState.LegalActions
+	}
 	for _, sess := range rt.players {
 		if sess == nil || sess.buffer == nil {
 			continue
@@ -24,7 +29,7 @@ func (c *Coordinator) emitTurnStarted(rt *tableRuntime) {
 			"turn_id":         rt.turnID,
 			"seat_id":         actorSeat,
 			"deadline_ms":     rt.engine.State.ActionTimeout.Milliseconds(),
-			"allowed_actions": []string{"fold", "check", "call", "raise", "bet"},
+			"allowed_actions": allowedActions,
 		})
 	}
 }

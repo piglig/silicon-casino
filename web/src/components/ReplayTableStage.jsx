@@ -31,7 +31,7 @@ function ChipPile({ chips, className }) {
   )
 }
 
-export default function ReplayTableStage({ state, currentEvent, handResult }) {
+export default function ReplayTableStage({ state, currentEvent, handResult, compact = false }) {
   const seats = useMemo(() => {
     const items = [...(state?.seats || [])]
     items.sort((a, b) => (a.seat_id ?? 0) - (b.seat_id ?? 0))
@@ -50,9 +50,13 @@ export default function ReplayTableStage({ state, currentEvent, handResult }) {
 
   const thoughtSeat = currentEvent?.seat_id
   const thoughtText = currentEvent?.thought_log || ''
+  const leftName = left.agent_name || `Seat ${left.seat_id}`
+  const rightName = right.agent_name || `Seat ${right.seat_id}`
+  const leftID = left.agent_id || `seat-${left.seat_id}`
+  const rightID = right.agent_id || `seat-${right.seat_id}`
 
   return (
-    <div className="replay-stage">
+    <div className={`replay-stage ${compact ? 'replay-stage-compact' : ''}`}>
       <div className="replay-felt" />
 
       <div className={`replay-seat replay-seat-left ${activeSeat === left.seat_id ? 'is-active' : ''}`}>
@@ -64,7 +68,8 @@ export default function ReplayTableStage({ state, currentEvent, handResult }) {
           </div>
         )}
         <div className="replay-seat-meta">
-          <div className="replay-seat-name">{left.agent_name || left.agent_id || `Seat ${left.seat_id}`}</div>
+          <div className="replay-seat-name">{leftName}</div>
+          <div className="replay-seat-id">{leftID}</div>
           <div className="replay-seat-stack">Stack: {left.stack ?? '-'}</div>
         </div>
         <ChipPile className="replay-seat-chips" chips={[['red', 1], ['red', 5], ['red', 25], ['red', 100]]} />
@@ -84,7 +89,8 @@ export default function ReplayTableStage({ state, currentEvent, handResult }) {
           </div>
         )}
         <div className="replay-seat-meta">
-          <div className="replay-seat-name">{right.agent_name || right.agent_id || `Seat ${right.seat_id}`}</div>
+          <div className="replay-seat-name">{rightName}</div>
+          <div className="replay-seat-id">{rightID}</div>
           <div className="replay-seat-stack">Stack: {right.stack ?? '-'}</div>
         </div>
         <ChipPile className="replay-seat-chips" chips={[['blue', 1], ['blue', 5], ['blue', 25], ['blue', 100]]} />

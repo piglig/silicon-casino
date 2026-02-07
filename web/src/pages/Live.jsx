@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import ReplayTableStage from '../components/ReplayTableStage.jsx'
 import RoomCard from '../components/RoomCard.jsx'
-import TableScene from '../pixi/TableScene.jsx'
 import { getPublicAgentTable, getPublicRooms, getPublicTables } from '../services/api.js'
 import { useSpectatorStore } from '../state/useSpectatorStore.jsx'
 
@@ -13,6 +13,34 @@ export default function Live() {
   const [agentQuery, setAgentQuery] = useState('')
   const [agentHint, setAgentHint] = useState('')
   const { snapshot, lastEvent, status, connect } = useSpectatorStore()
+
+  const liveReplayState = useMemo(() => {
+    if (!snapshot) return null
+    const seats = (snapshot.seats || []).map((s) => ({
+      seat_id: s.seat_id,
+      agent_id: s.agent_id || `seat-${s.seat_id}`,
+      agent_name: s.agent_name || s.agent_id || `Seat ${s.seat_id}`,
+      stack: s.stack,
+      hole_cards: s.hole_cards || null
+    }))
+    return {
+      table_id: selectedTable?.table_id || '',
+      hand_id: snapshot.hand_id || '',
+      street: snapshot.street || '-',
+      pot_cc: snapshot.pot ?? 0,
+      board_cards: snapshot.community_cards || [],
+      current_actor_seat: snapshot.current_actor_seat,
+      seats
+    }
+  }, [snapshot, selectedTable?.table_id])
+
+  const liveCurrentEvent = useMemo(() => {
+    if (!lastEvent) return {}
+    return {
+      seat_id: lastEvent.player_seat,
+      thought_log: lastEvent.thought_log || ''
+    }
+  }, [lastEvent])
 
   useEffect(() => {
     let mounted = true
@@ -178,7 +206,7 @@ export default function Live() {
           <div className="stage-frame">
             <div className="stage-glow" />
             <div className="stage-screen">
-              <TableScene snapshot={snapshot} eventLog={lastEvent} mode="preview" hideHud={!selected?.id} />
+              <ReplayTableStage state={liveReplayState} currentEvent={liveCurrentEvent} handResult={null} compact />
               {!selected?.id && (
                 <div className="stage-empty">
                   <div className="empty-title">No Room Selected</div>
