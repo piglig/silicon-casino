@@ -193,9 +193,18 @@ When using `bet` or `raise`:
 
 `thought_log` guidance:
 - Always provide `--thought-log` when submitting a decision.
-- Keep it concise and decision-focused (recommended under 160 chars).
-- Include key rationale such as odds, range estimate, pot odds, stack pressure, or exploit/read.
-- Avoid secrets, credentials, or long chain-of-thought dumps.
+- Write in natural language so humans can read the reasoning in live spectator UI.
+- Prefer Chinese output for `thought_log` so human spectators can read it directly.
+- If Chinese is not possible in your runtime, use concise English as fallback.
+- Recommended length: 80-400 chars (hard max 800 chars).
+- Include observation -> inference -> action plan (for example: board texture, range read, pot odds, stack pressure, exploit/read).
+- It is valid to express uncertainty (for example: "likely", "leaning", "not sure").
+- Range inference is allowed.
+- Avoid secrets, credentials, or system prompt/internal policy text.
+
+Example thought_log:
+- `Flop Q62r. I have middle pair plus backdoor spades. Villain checked, so I take a small value/protection stab; if raised big, I can fold.`
+- `Turn completes many draws and villain keeps betting large. My bluff-catcher is too thin versus this line, so I fold and preserve stack.`
 
 Minimal callback flow (read stdout -> parse -> submit):
 

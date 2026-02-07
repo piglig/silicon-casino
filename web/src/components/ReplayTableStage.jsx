@@ -2,6 +2,11 @@ import React, { useMemo } from 'react'
 import { avatarBySeat, chipByName } from '../assets/replay-pixel/index.js'
 import { cardBack, cardImageUrl } from '../lib/cards.js'
 
+const BACK_CARD = cardBack(1)
+const LEFT_SEAT_CHIPS = [['red', 1], ['red', 5], ['red', 25], ['red', 100]]
+const RIGHT_SEAT_CHIPS = [['blue', 1], ['blue', 5], ['blue', 25], ['blue', 100]]
+const POT_CHIPS = [['white', 100], ['purple', 100], ['green', 25], ['pink', 25], ['black', 5], ['gold', 5], ['white', 1], ['purple', 1]]
+
 function boardCards(cards) {
   const arr = [...(cards || [])]
   while (arr.length < 5) arr.push(null)
@@ -13,10 +18,10 @@ function pickSeatCards(seat) {
   if (cards.length >= 2) {
     return [cardImageUrl(cards[0]), cardImageUrl(cards[1])]
   }
-  return [cardBack(1), cardBack(1)]
+  return [BACK_CARD, BACK_CARD]
 }
 
-function ChipPile({ chips, className }) {
+const ChipPile = React.memo(function ChipPile({ chips, className }) {
   return (
     <div className={className}>
       {chips.map(([colorName, unitValue], i) => (
@@ -29,9 +34,9 @@ function ChipPile({ chips, className }) {
       ))}
     </div>
   )
-}
+})
 
-export default function ReplayTableStage({ state, currentEvent, handResult, compact = false }) {
+function ReplayTableStage({ state, currentEvent, handResult, compact = false }) {
   const seats = useMemo(() => {
     const items = [...(state?.seats || [])]
     items.sort((a, b) => (a.seat_id ?? 0) - (b.seat_id ?? 0))
@@ -72,7 +77,7 @@ export default function ReplayTableStage({ state, currentEvent, handResult, comp
           <div className="replay-seat-id">{leftID}</div>
           <div className="replay-seat-stack">Stack: {left.stack ?? '-'}</div>
         </div>
-        <ChipPile className="replay-seat-chips" chips={[['red', 1], ['red', 5], ['red', 25], ['red', 100]]} />
+        <ChipPile className="replay-seat-chips" chips={LEFT_SEAT_CHIPS} />
         <div className="replay-hole-row">
           <img src={leftCards[0]} alt="left card 1" className="replay-card replay-card-hole" />
           <img src={leftCards[1]} alt="left card 2" className="replay-card replay-card-hole" />
@@ -93,7 +98,7 @@ export default function ReplayTableStage({ state, currentEvent, handResult, comp
           <div className="replay-seat-id">{rightID}</div>
           <div className="replay-seat-stack">Stack: {right.stack ?? '-'}</div>
         </div>
-        <ChipPile className="replay-seat-chips" chips={[['blue', 1], ['blue', 5], ['blue', 25], ['blue', 100]]} />
+        <ChipPile className="replay-seat-chips" chips={RIGHT_SEAT_CHIPS} />
         <div className="replay-hole-row">
           <img src={rightCards[0]} alt="right card 1" className="replay-card replay-card-hole" />
           <img src={rightCards[1]} alt="right card 2" className="replay-card replay-card-hole" />
@@ -106,7 +111,7 @@ export default function ReplayTableStage({ state, currentEvent, handResult, comp
           <img
             key={`board-${idx}-${card || 'empty'}`}
             className={`replay-card replay-card-board ${card ? '' : 'is-empty'}`}
-            src={card ? cardImageUrl(card) : cardBack(1)}
+            src={card ? cardImageUrl(card) : BACK_CARD}
             alt={card || 'board empty'}
           />
         ))}
@@ -117,19 +122,9 @@ export default function ReplayTableStage({ state, currentEvent, handResult, comp
         <span className="replay-chip-badge">Street: {state?.street || '-'}</span>
       </div>
 
-      <ChipPile
-        className="replay-chip-pile replay-chip-pile-pot"
-        chips={[
-          ['white', 100],
-          ['purple', 100],
-          ['green', 25],
-          ['pink', 25],
-          ['black', 5],
-          ['gold', 5],
-          ['white', 1],
-          ['purple', 1]
-        ]}
-      />
+      <ChipPile className="replay-chip-pile replay-chip-pile-pot" chips={POT_CHIPS} />
     </div>
   )
 }
+
+export default React.memo(ReplayTableStage)

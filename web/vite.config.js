@@ -13,6 +13,15 @@ export default defineConfig({
   },
   build: {
     outDir: path.resolve(__dirname, '../internal/web/static'),
-    emptyOutDir: true
+    emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          if (id.includes('/@tanstack/')) return 'tanstack'
+          return 'vendor'
+        }
+      }
+    }
   }
 })

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import ReplayTableStage from '../components/ReplayTableStage.jsx'
 import RoomCard from '../components/RoomCard.jsx'
@@ -6,13 +7,24 @@ import { getPublicAgentTable, getPublicRooms, getPublicTables } from '../service
 import { useSpectatorStore } from '../state/useSpectatorStore.jsx'
 
 export default function Live() {
-  const [rooms, setRooms] = useState([])
   const [selected, setSelected] = useState(null)
-  const [tables, setTables] = useState([])
   const [selectedTable, setSelectedTable] = useState(null)
   const [agentQuery, setAgentQuery] = useState('')
   const [agentHint, setAgentHint] = useState('')
   const { snapshot, lastEvent, status, connect } = useSpectatorStore()
+  const roomsQuery = useQuery({
+    queryKey: ['rooms'],
+    queryFn: getPublicRooms,
+    refetchInterval: 5000
+  })
+  const rooms = roomsQuery.data || []
+  const tablesQuery = useQuery({
+    queryKey: ['tables', selected?.id || ''],
+    queryFn: () => getPublicTables(selected.id),
+    enabled: !!selected?.id,
+    refetchInterval: 5000
+  })
+  const tables = tablesQuery.data || []
 
   const liveReplayState = useMemo(() => {
     if (!snapshot) return null
@@ -43,52 +55,17 @@ export default function Live() {
   }, [lastEvent])
 
   useEffect(() => {
-    let mounted = true
-    const load = () => {
-      getPublicRooms()
-        .then((items) => {
-          if (!mounted) return
-          setRooms(items)
-          if (!selected && items.length) {
-            setSelected(items[0])
-          }
-        })
-        .catch(() => {})
-    }
-    load()
-    const id = setInterval(load, 5000)
-    return () => {
-      mounted = false
-      clearInterval(id)
-    }
-  }, [selected])
+    if (!selected && rooms.length) setSelected(rooms[0])
+  }, [selected, rooms])
 
   useEffect(() => {
     if (!selected?.id) {
-      setTables([])
       setSelectedTable(null)
       return
     }
-    let mounted = true
-    const load = () => {
-      getPublicTables(selected.id)
-        .then((items) => {
-          if (!mounted) return
-          setTables(items)
-          const still = items.find((t) => t.table_id === selectedTable?.table_id)
-          if (!still) {
-            setSelectedTable(items[0] || null)
-          }
-        })
-        .catch(() => {})
-    }
-    load()
-    const id = setInterval(load, 5000)
-    return () => {
-      mounted = false
-      clearInterval(id)
-    }
-  }, [selected?.id, selectedTable?.table_id])
+    const still = tables.find((t) => t.table_id === selectedTable?.table_id)
+    if (!still) setSelectedTable(tables[0] || null)
+  }, [selected?.id, selectedTable?.table_id, tables])
 
   useEffect(() => {
     if (selectedTable?.table_id) {

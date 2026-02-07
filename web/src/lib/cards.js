@@ -1,6 +1,7 @@
 const modules = import.meta.glob('../assets/replay-pixel/cards/*.png', { eager: true, import: 'default' })
 
 const byName = {}
+const labelUrlCache = new Map()
 for (const [path, url] of Object.entries(modules)) {
   const file = path.split('/').pop()
   byName[file] = url
@@ -21,9 +22,13 @@ export function cardKeyFromLabel(label) {
 }
 
 export function cardImageUrl(label, fallback = 'BACK_1') {
+  const cacheKey = `${String(label || '')}|${fallback}`
+  const cached = labelUrlCache.get(cacheKey)
+  if (cached !== undefined) return cached
   const key = cardKeyFromLabel(label)
-  if (key && byName[`${key}.png`]) return byName[`${key}.png`]
-  return byName[`${fallback}.png`] || ''
+  const url = (key && byName[`${key}.png`]) ? byName[`${key}.png`] : (byName[`${fallback}.png`] || '')
+  labelUrlCache.set(cacheKey, url)
+  return url
 }
 
 export function cardBack(index = 1) {
