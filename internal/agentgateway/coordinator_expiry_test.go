@@ -8,6 +8,9 @@ import (
 
 func TestExpireSessionsClosesExpired(t *testing.T) {
 	coord, s1ID, s2ID := setupMatchedSessions(t)
+	prevGrace := reconnectGracePeriod
+	reconnectGracePeriod = 20 * time.Millisecond
+	defer func() { reconnectGracePeriod = prevGrace }()
 
 	coord.mu.Lock()
 	coord.sessions[s1ID].session.ExpiresAt = time.Now().Add(-time.Minute)
@@ -19,12 +22,8 @@ func TestExpireSessionsClosesExpired(t *testing.T) {
 		t.Fatalf("expected 1 expired session, got %d", n)
 	}
 
-	coord.mu.Lock()
-	_, ok := coord.sessions[s1ID]
-	coord.mu.Unlock()
-	if ok {
-		t.Fatal("expected expired session removed from coordinator")
-	}
+	time.Sleep(40 * time.Millisecond)
+	coord.sweepTableTransitions(context.Background(), time.Now())
 
 	sess, err := coord.store.GetAgentSession(context.Background(), s1ID)
 	if err != nil {

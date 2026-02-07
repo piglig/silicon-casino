@@ -359,7 +359,7 @@ async function runNextDecision(args: ArgMap): Promise<void> {
       const evType = envelope?.event || evt.event;
       const data = envelope?.data || {};
 
-      if (evType === "session_closed") {
+      if (evType === "session_closed" || evType === "table_closed") {
         await saveDecisionState({
           session_id: "",
           stream_url: "",
@@ -367,11 +367,63 @@ async function runNextDecision(args: ArgMap): Promise<void> {
           last_turn_id: "",
           pending_decision: undefined
         });
-        emit({ type: "session_closed", session_id: sessionId });
+        emit({ type: "table_closed", session_id: sessionId, reason: data?.reason || "table_closed" });
+        decided = true;
+        return true;
+      }
+      if (evType === "reconnect_grace_started") {
+        emit({
+          type: "noop",
+          reason: "table_closing",
+          event: evType,
+          session_id: sessionId,
+          disconnected_agent_id: data?.disconnected_agent_id,
+          deadline_ts: data?.deadline_ts
+        });
+        decided = true;
+        return true;
+      }
+      if (evType === "opponent_forfeited") {
+        emit({
+          type: "noop",
+          reason: "table_closing",
+          event: evType,
+          session_id: sessionId
+        });
+        decided = true;
         return true;
       }
       if (evType !== "state_snapshot") {
         return false;
+      }
+      const tableStatus = String(data?.table_status || "active");
+      if (tableStatus === "closing") {
+        emit({
+          type: "noop",
+          reason: "table_closing",
+          event: evType,
+          session_id: sessionId,
+          close_reason: data?.close_reason,
+          reconnect_deadline_ts: data?.reconnect_deadline_ts
+        });
+        decided = true;
+        return true;
+      }
+      if (tableStatus === "closed") {
+        await saveDecisionState({
+          session_id: "",
+          stream_url: "",
+          last_event_id: "",
+          last_turn_id: "",
+          pending_decision: undefined
+        });
+        emit({
+          type: "table_closed",
+          session_id: sessionId,
+          reason: data?.close_reason || "table_closed"
+        });
+        decided = true;
+        return true;
       }
       if (!tracker.shouldRequestDecision(data)) {
         return false;
@@ -481,17 +533,39 @@ async function runSubmitDecision(args: ArgMap): Promise<void> {
     console.log(JSON.stringify(result, null, 2));
   } catch (err) {
     const apiErr = err as APAClientError;
-    if (apiErr?.code === "invalid_turn_id" || apiErr?.code === "not_your_turn") {
+    if (
+      apiErr?.code === "invalid_turn_id" ||
+      apiErr?.code === "not_your_turn" ||
+      apiErr?.code === "table_closing" ||
+      apiErr?.code === "table_closed" ||
+      apiErr?.code === "opponent_disconnected"
+    ) {
       await saveDecisionState({
         ...state,
         pending_decision: undefined
       });
-      emit({
-        type: "stale_decision",
-        decision_id: decisionID,
-        error: apiErr.code,
-        message: "decision expired; run apa-bot next-decision again"
-      });
+      if (apiErr?.code === "table_closed") {
+        emit({
+          type: "table_closed",
+          decision_id: decisionID,
+          error: apiErr.code,
+          message: "table closed; re-join matchmaking"
+        });
+      } else if (apiErr?.code === "table_closing" || apiErr?.code === "opponent_disconnected") {
+        emit({
+          type: "table_closing",
+          decision_id: decisionID,
+          error: apiErr.code,
+          message: "table is closing; pause and fetch new decision later"
+        });
+      } else {
+        emit({
+          type: "stale_decision",
+          decision_id: decisionID,
+          error: apiErr.code,
+          message: "decision expired; run apa-bot next-decision again"
+        });
+      }
       return;
     }
     throw err;

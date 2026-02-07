@@ -55,10 +55,12 @@ function ReplayTableStage({ state, currentEvent, handResult, compact = false }) 
 
   const thoughtSeat = currentEvent?.seat_id
   const thoughtText = currentEvent?.thought_log || ''
-  const leftName = left.agent_name || `Seat ${left.seat_id}`
-  const rightName = right.agent_name || `Seat ${right.seat_id}`
-  const leftID = left.agent_id || `seat-${left.seat_id}`
-  const rightID = right.agent_id || `seat-${right.seat_id}`
+  const leftOccupied = !!left.agent_id
+  const rightOccupied = !!right.agent_id
+  const leftName = leftOccupied ? (left.agent_name || `Seat ${left.seat_id}`) : `Seat ${left.seat_id} (waiting)`
+  const rightName = rightOccupied ? (right.agent_name || `Seat ${right.seat_id}`) : `Seat ${right.seat_id} (waiting)`
+  const leftID = leftOccupied ? left.agent_id : '-'
+  const rightID = rightOccupied ? right.agent_id : '-'
 
   return (
     <div className={`replay-stage ${compact ? 'replay-stage-compact' : ''}`}>
@@ -75,14 +77,20 @@ function ReplayTableStage({ state, currentEvent, handResult, compact = false }) 
         <div className="replay-seat-meta">
           <div className="replay-seat-name">{leftName}</div>
           <div className="replay-seat-id">{leftID}</div>
-          <div className="replay-seat-stack">Stack: {left.stack ?? '-'}</div>
+          <div className="replay-seat-stack">Stack: {leftOccupied ? (left.stack ?? '-') : '-'}</div>
         </div>
-        <ChipPile className="replay-seat-chips" chips={LEFT_SEAT_CHIPS} />
+        {leftOccupied && <ChipPile className="replay-seat-chips" chips={LEFT_SEAT_CHIPS} />}
         <div className="replay-hole-row">
-          <img src={leftCards[0]} alt="left card 1" className="replay-card replay-card-hole" />
-          <img src={leftCards[1]} alt="left card 2" className="replay-card replay-card-hole" />
+          {leftOccupied ? (
+            <>
+              <img src={leftCards[0]} alt="left card 1" className="replay-card replay-card-hole" />
+              <img src={leftCards[1]} alt="left card 2" className="replay-card replay-card-hole" />
+            </>
+          ) : (
+            <div className="muted">Waiting for agent...</div>
+          )}
         </div>
-        {thoughtText && thoughtSeat === left.seat_id && <div className="replay-thought left">{thoughtText}</div>}
+        {leftOccupied && thoughtText && thoughtSeat === left.seat_id && <div className="replay-thought left">{thoughtText}</div>}
       </div>
 
       <div className={`replay-seat replay-seat-right ${activeSeat === right.seat_id ? 'is-active' : ''}`}>
@@ -96,14 +104,20 @@ function ReplayTableStage({ state, currentEvent, handResult, compact = false }) 
         <div className="replay-seat-meta">
           <div className="replay-seat-name">{rightName}</div>
           <div className="replay-seat-id">{rightID}</div>
-          <div className="replay-seat-stack">Stack: {right.stack ?? '-'}</div>
+          <div className="replay-seat-stack">Stack: {rightOccupied ? (right.stack ?? '-') : '-'}</div>
         </div>
-        <ChipPile className="replay-seat-chips" chips={RIGHT_SEAT_CHIPS} />
+        {rightOccupied && <ChipPile className="replay-seat-chips" chips={RIGHT_SEAT_CHIPS} />}
         <div className="replay-hole-row">
-          <img src={rightCards[0]} alt="right card 1" className="replay-card replay-card-hole" />
-          <img src={rightCards[1]} alt="right card 2" className="replay-card replay-card-hole" />
+          {rightOccupied ? (
+            <>
+              <img src={rightCards[0]} alt="right card 1" className="replay-card replay-card-hole" />
+              <img src={rightCards[1]} alt="right card 2" className="replay-card replay-card-hole" />
+            </>
+          ) : (
+            <div className="muted">Waiting for agent...</div>
+          )}
         </div>
-        {thoughtText && thoughtSeat === right.seat_id && <div className="replay-thought right">{thoughtText}</div>}
+        {rightOccupied && thoughtText && thoughtSeat === right.seat_id && <div className="replay-thought right">{thoughtText}</div>}
       </div>
 
       <div className="replay-board-row">

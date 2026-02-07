@@ -15,6 +15,9 @@ var (
 	errNotYourTurn      = errors.New("not_your_turn")
 	errInvalidAction    = errors.New("invalid_action")
 	errInvalidRaise     = errors.New("invalid_raise")
+	errTableClosing     = errors.New("table_closing")
+	errTableClosed      = errors.New("table_closed")
+	errOpponentDown     = errors.New("opponent_disconnected")
 )
 
 func (c *Coordinator) SubmitAction(ctx context.Context, sessionID string, req ActionRequest) (*ActionResponse, error) {
@@ -43,6 +46,15 @@ func (c *Coordinator) SubmitAction(ctx context.Context, sessionID string, req Ac
 
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
+	if rt.status == tableStatusClosing {
+		if rt.closeReason == "client_closed" || rt.closeReason == "expired" || strings.HasPrefix(rt.closeReason, "opponent_") {
+			return nil, errOpponentDown
+		}
+		return nil, errTableClosing
+	}
+	if rt.status == tableStatusClosed {
+		return nil, errTableClosed
+	}
 	if req.TurnID != rt.turnID {
 		res := ActionResponse{Accepted: false, RequestID: req.RequestID, Reason: "invalid_turn_id"}
 		_, _ = c.saveActionResult(ctx, sessionID, req, res)
@@ -124,14 +136,16 @@ func (c *Coordinator) SubmitAction(ctx context.Context, sessionID string, req Ac
 				"pot_cc":  pot,
 				"street":  string(rt.engine.State.Street),
 			})
-			if err := rt.startNextHand(ctx); err == nil {
-				rt.turnID = nextTurnID()
-				rt.handSeq = 0
-				c.appendReplayEvent(ctx, rt, "hand_started", "", map[string]any{
-					"hand_id": rt.engine.State.HandID,
-					"street":  string(rt.engine.State.Street),
-				})
-				c.appendReplayEvent(ctx, rt, "state_snapshot", "", c.buildReplayState(rt))
+			if rt.status == tableStatusActive {
+				if err := rt.startNextHand(ctx); err == nil {
+					rt.turnID = nextTurnID()
+					rt.handSeq = 0
+					c.appendReplayEvent(ctx, rt, "hand_started", "", map[string]any{
+						"hand_id": rt.engine.State.HandID,
+						"street":  string(rt.engine.State.Street),
+					})
+					c.appendReplayEvent(ctx, rt, "state_snapshot", "", c.buildReplayState(rt))
+				}
 			}
 		} else if prevStreet != rt.engine.State.Street {
 			rt.turnID = nextTurnID()

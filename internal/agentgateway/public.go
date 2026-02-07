@@ -15,7 +15,11 @@ func (c *Coordinator) GetPublicState(tableID string) (viewmodel.PublicStateView,
 	}
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
-	return viewmodel.BuildPublicState(rt.engine.State), nil
+	state := viewmodel.BuildPublicState(rt.engine.State)
+	state.TableStatus = rt.status
+	state.ReconnectDeadlineTS = rt.reconnectDeadline.UnixMilli()
+	state.CloseReason = rt.closeReason
+	return state, nil
 }
 
 func (c *Coordinator) GetPublicBuffer(tableID, roomID string) (*EventBuffer, error) {

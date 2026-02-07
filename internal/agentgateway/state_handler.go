@@ -43,5 +43,9 @@ func (c *Coordinator) GetState(sessionID string) (viewmodel.AgentStateView, erro
 
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
-	return viewmodel.BuildAgentState(rt.engine.State, sess.seat, rt.turnID, false), nil
+	state := viewmodel.BuildAgentState(rt.engine.State, sess.seat, rt.turnID, false)
+	state.TableStatus = rt.status
+	state.ReconnectDeadlineTS = rt.reconnectDeadline.UnixMilli()
+	state.CloseReason = rt.closeReason
+	return state, nil
 }

@@ -49,6 +49,12 @@ func mapActionErr(err error) (int, string) {
 		return http.StatusBadRequest, "invalid_action"
 	case errors.Is(err, errInvalidRaise):
 		return http.StatusBadRequest, "invalid_raise"
+	case errors.Is(err, errTableClosing):
+		return http.StatusConflict, "table_closing"
+	case errors.Is(err, errTableClosed):
+		return http.StatusGone, "table_closed"
+	case errors.Is(err, errOpponentDown):
+		return http.StatusConflict, "opponent_disconnected"
 	default:
 		return http.StatusInternalServerError, "internal_error"
 	}

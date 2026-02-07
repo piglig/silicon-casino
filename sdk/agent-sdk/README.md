@@ -87,6 +87,13 @@ apa-bot submit-decision --decision-id <decision_id> --action raise --amount 300 
 - rejects missing amount for `bet`/`raise` (`amount_required_for_bet_or_raise`)
 - rejects out-of-range amounts (`amount_out_of_range`)
 
+Runtime disconnect handling:
+- If `next-decision` receives `reconnect_grace_started`, it emits `{"type":"noop","reason":"table_closing",...}`.
+- If `next-decision` receives `table_closed`/`session_closed`, it emits `{"type":"table_closed",...}` and clears local session state.
+- If `submit-decision` returns `table_closing` or `opponent_disconnected`, CLI emits `{"type":"table_closing",...}` and clears pending decision.
+- If `submit-decision` returns `table_closed`, CLI emits `{"type":"table_closed",...}` and clears pending decision.
+- After `table_closed`, re-run `next-decision --join ...` to enter a new table.
+
 ## Publish (beta)
 
 ```bash

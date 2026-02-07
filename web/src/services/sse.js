@@ -14,6 +14,11 @@ export class SpectateSSE {
   }
 
   connect(roomOrOpts) {
+    this._clearTimer()
+    if (this.es) {
+      this.es.close()
+      this.es = null
+    }
     if (roomOrOpts && typeof roomOrOpts === 'object') {
       this.roomId = roomOrOpts.roomId || ''
       this.tableId = roomOrOpts.tableId || ''
@@ -66,12 +71,17 @@ export class SpectateSSE {
         const envelope = JSON.parse(ev.data)
         const evt = envelope?.event || ev.type
         if (evt === 'table_snapshot') {
-          this.onMessage({ type: 'state_update', ...envelope.data })
+          this.onMessage({
+            type: 'state_update',
+            table_id: envelope?.data?.table_id || envelope?.session_id || '',
+            ...envelope.data
+          })
           return
         }
         if (evt === 'action_log') {
           this.onMessage({
             type: 'event_log',
+            table_id: envelope?.data?.table_id || envelope?.session_id || '',
             player_seat: envelope.data?.player_seat,
             action: envelope.data?.action,
             amount: envelope.data?.amount || 0,
@@ -82,6 +92,41 @@ export class SpectateSSE {
         }
         if (evt === 'hand_end') {
           this.onMessage({ type: 'hand_end', ...envelope.data })
+          return
+        }
+        if (evt === 'reconnect_grace_started') {
+          this.onMessage({
+            type: 'table_closing',
+            table_id: envelope?.data?.table_id || envelope?.session_id || '',
+            disconnected_agent_id: envelope?.data?.disconnected_agent_id || '',
+            deadline_ts: envelope?.data?.deadline_ts || 0,
+            reason: envelope?.data?.reason || 'table_closing'
+          })
+          return
+        }
+        if (evt === 'opponent_reconnected') {
+          this.onMessage({
+            type: 'table_recovered',
+            table_id: envelope?.data?.table_id || envelope?.session_id || '',
+            agent_id: envelope?.data?.agent_id || ''
+          })
+          return
+        }
+        if (evt === 'opponent_forfeited') {
+          this.onMessage({
+            type: 'table_closing',
+            table_id: envelope?.data?.table_id || envelope?.session_id || '',
+            disconnected_agent_id: envelope?.data?.forfeiter_agent_id || '',
+            reason: envelope?.data?.reason || 'opponent_forfeited'
+          })
+          return
+        }
+        if (evt === 'table_closed') {
+          this.onMessage({
+            type: 'table_closed',
+            table_id: envelope?.data?.table_id || envelope?.session_id || '',
+            reason: envelope?.data?.reason || 'table_closed'
+          })
         }
       } catch (err) {
         this.onMessage({ type: 'parse_error', error: err?.message || 'parse_error' })
@@ -91,6 +136,10 @@ export class SpectateSSE {
     source.addEventListener('table_snapshot', handleEnvelope)
     source.addEventListener('action_log', handleEnvelope)
     source.addEventListener('hand_end', handleEnvelope)
+    source.addEventListener('reconnect_grace_started', handleEnvelope)
+    source.addEventListener('opponent_reconnected', handleEnvelope)
+    source.addEventListener('opponent_forfeited', handleEnvelope)
+    source.addEventListener('table_closed', handleEnvelope)
     source.addEventListener('message', handleEnvelope)
   }
 

@@ -210,6 +210,25 @@ func (q *Queries) ListTables(ctx context.Context, arg ListTablesParams) ([]Table
 	return items, nil
 }
 
+const markTableStatusByID = `-- name: MarkTableStatusByID :execrows
+UPDATE tables
+SET status = $2
+WHERE id = $1
+`
+
+type MarkTableStatusByIDParams struct {
+	ID     string
+	Status string
+}
+
+func (q *Queries) MarkTableStatusByID(ctx context.Context, arg MarkTableStatusByIDParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markTableStatusByID, arg.ID, arg.Status)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const recordAction = `-- name: RecordAction :exec
 INSERT INTO actions (id, hand_id, agent_id, action_type, amount_cc)
 VALUES ($1, $2, $3, $4, $5)

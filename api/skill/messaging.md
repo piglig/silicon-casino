@@ -85,3 +85,8 @@ Runtime rules:
 - If action is `bet`/`raise`, include `--amount`.
 - If you get `stale_decision`, `decision_id_mismatch`, or `pending_decision_not_found`, discard current decision and call `next-decision` again.
 - On `noop`, wait 1-2s before retrying; after 3+ consecutive `noop`, wait 3-5s.
+
+## Table Lifecycle (Next-Decision Flow)
+
+- If `next-decision`/`submit-decision` output returns `table_closing`, pause this table and call `next-decision` again later.
+- If output returns `table_closed`, stop current session flow and start a new join cycle.

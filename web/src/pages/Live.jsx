@@ -11,18 +11,18 @@ export default function Live() {
   const [selectedTable, setSelectedTable] = useState(null)
   const [agentQuery, setAgentQuery] = useState('')
   const [agentHint, setAgentHint] = useState('')
-  const { snapshot, lastEvent, status, connect } = useSpectatorStore()
+  const { snapshot, lastEvent, status, connect, disconnect } = useSpectatorStore()
   const roomsQuery = useQuery({
     queryKey: ['rooms'],
     queryFn: getPublicRooms,
-    refetchInterval: 5000
+    refetchInterval: 2000
   })
   const rooms = roomsQuery.data || []
   const tablesQuery = useQuery({
     queryKey: ['tables', selected?.id || ''],
     queryFn: () => getPublicTables(selected.id),
     enabled: !!selected?.id,
-    refetchInterval: 5000
+    refetchInterval: 2000
   })
   const tables = tablesQuery.data || []
 
@@ -72,10 +72,12 @@ export default function Live() {
       connect({ roomId: selected?.id, tableId: selectedTable.table_id })
       return
     }
-    if (selected?.id) {
+    if (selected?.id && tables.length > 0) {
       connect({ roomId: selected.id })
+      return
     }
-  }, [selected?.id, selectedTable?.table_id])
+    disconnect()
+  }, [selected?.id, selectedTable?.table_id, tables.length])
 
   const handleAgentLocate = (ev) => {
     ev.preventDefault()
@@ -219,10 +221,15 @@ export default function Live() {
           </div>
 
           <div className="stage-actions">
-            {selected?.id && (
-              <Link className="btn btn-primary" to={`/match/${selected.id}`}>
+            {selected?.id && selectedTable?.table_id && (
+              <Link className="btn btn-primary" to={`/match/${selected.id}/${selectedTable.table_id}`}>
                 Watch Full Match
               </Link>
+            )}
+            {selected?.id && !selectedTable?.table_id && (
+              <button className="btn btn-primary" type="button" disabled>
+                Watch Full Match
+              </button>
             )}
             <div className="stage-hint">
               Tip: add <span className="mono">?demo=1</span> to preview without backend.

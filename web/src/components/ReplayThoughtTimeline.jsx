@@ -14,7 +14,7 @@ function whoLabel(item, seatLabelById, agentNameById) {
     return agentNameById[item.actor_agent_id]
   }
   if (item.actor_agent_id) return item.actor_agent_id
-  return seatTag(item.seat_id)
+  return 'Unknown Agent'
 }
 
 export default function ReplayThoughtTimeline({ items, activeSeq, seatLabelById = {}, agentNameById = {} }) {

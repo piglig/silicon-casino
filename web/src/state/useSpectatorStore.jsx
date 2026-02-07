@@ -54,10 +54,58 @@ export function SpectatorProvider({ children }) {
   const [roomId, setRoomId] = useState('')
   const [actionDeadline, setActionDeadline] = useState(null)
   const [timeLeftMs, setTimeLeftMs] = useState(null)
+  const [disconnectedAgentId, setDisconnectedAgentId] = useState('')
   const demoTimerRef = useRef(null)
   const sseRef = useRef(null)
+  const disconnectedAgentIdRef = useRef('')
 
   const demoMode = useMemo(() => new URLSearchParams(window.location.search).get('demo') === '1', [])
+
+  const setDisconnectedAgent = (agentId) => {
+    disconnectedAgentIdRef.current = agentId || ''
+    setDisconnectedAgentId(agentId || '')
+  }
+
+  const clearLiveState = () => {
+    setSnapshot(null)
+    setLastEvent(null)
+    setShowdown([])
+    setActionDeadline(null)
+    setTimeLeftMs(null)
+    setDisconnectedAgent('')
+  }
+
+  const clearLivePanels = () => {
+    setEventLogs([])
+    setThoughtLogs([])
+    setShowdown([])
+  }
+
+  const handleStatus = (nextStatus) => {
+    setStatus(nextStatus)
+    if (nextStatus === 'reconnecting' || nextStatus === 'disconnected') {
+      clearLiveState()
+    }
+  }
+
+  const applyDisconnectedSeat = (snap, agentId) => {
+    if (!snap || !agentId) return snap
+    const seats = Array.isArray(snap.seats) ? snap.seats : []
+    return {
+      ...snap,
+      seats: seats.map((seat) => {
+        if (!seat || seat.agent_id !== agentId) return seat
+        return {
+          ...seat,
+          agent_id: '',
+          agent_name: '',
+          stack: null,
+          hole_cards: [],
+          is_active: false
+        }
+      })
+    }
+  }
 
   const appendEvent = (evt) => {
     setEventLogs((prev) => [evt, ...prev].slice(0, MAX_EVENTS))
@@ -75,8 +123,26 @@ export function SpectatorProvider({ children }) {
 
   const handleMessage = (msg) => {
     if (msg.type === 'state_update') {
-      setSnapshot(msg)
-      if (msg.action_timeout_ms) {
+      const tableStatus = String(msg.table_status || 'active')
+      if (tableStatus === 'closed') {
+        clearLiveState()
+        clearLivePanels()
+        appendEvent({
+          ts: new Date().toLocaleTimeString(),
+          seat: '-',
+          action: 'table_closed',
+          amount: 0,
+          event: 'table_closed',
+          thought: msg.close_reason || 'table closed'
+        })
+        return
+      }
+      const nextSnapshot = applyDisconnectedSeat(msg, disconnectedAgentIdRef.current)
+      setSnapshot(nextSnapshot)
+      if (tableStatus === 'closing') {
+        setActionDeadline(null)
+        setTimeLeftMs(null)
+      } else if (msg.action_timeout_ms) {
         const deadline = Date.now() + msg.action_timeout_ms
         setActionDeadline(deadline)
       }
@@ -101,6 +167,43 @@ export function SpectatorProvider({ children }) {
         event: 'hand_end',
         thought: msg.winner ? `Winner: ${msg.winner}` : ''
       })
+    } else if (msg.type === 'table_closing') {
+      const nextDisconnectedId = msg.disconnected_agent_id || disconnectedAgentIdRef.current
+      if (msg.disconnected_agent_id) {
+        setDisconnectedAgent(msg.disconnected_agent_id)
+      }
+      setActionDeadline(null)
+      setTimeLeftMs(null)
+      setSnapshot((prev) => applyDisconnectedSeat(prev, nextDisconnectedId))
+      appendEvent({
+        ts: new Date().toLocaleTimeString(),
+        seat: '-',
+        action: 'table_closing',
+        amount: 0,
+        event: 'table_closing',
+        thought: msg.reason || 'opponent disconnected'
+      })
+    } else if (msg.type === 'table_recovered') {
+      setDisconnectedAgent('')
+      appendEvent({
+        ts: new Date().toLocaleTimeString(),
+        seat: '-',
+        action: 'table_recovered',
+        amount: 0,
+        event: 'table_recovered',
+        thought: msg.agent_id ? `${msg.agent_id} reconnected` : 'opponent reconnected'
+      })
+    } else if (msg.type === 'table_closed') {
+      clearLiveState()
+      clearLivePanels()
+      appendEvent({
+        ts: new Date().toLocaleTimeString(),
+        seat: '-',
+        action: 'table_closed',
+        amount: 0,
+        event: 'table_closed',
+        thought: msg.reason || 'table closed'
+      })
     }
   }
 
@@ -114,12 +217,13 @@ export function SpectatorProvider({ children }) {
       nextRoomId = nextRoomOrOpts || ''
       nextTableId = maybeTableId || ''
     }
+    clearLiveState()
     setRoomId(nextTableId || nextRoomId || '')
     if (demoMode) return
     if (!sseRef.current) {
       sseRef.current = new SpectateSSE({
         onMessage: handleMessage,
-        onStatus: setStatus
+        onStatus: handleStatus
       })
     }
     sseRef.current.connect({ roomId: nextRoomId || '', tableId: nextTableId || '' })
@@ -128,6 +232,7 @@ export function SpectatorProvider({ children }) {
   const disconnect = () => {
     if (demoMode) return
     sseRef.current?.disconnect()
+    clearLiveState()
   }
 
   useEffect(() => {

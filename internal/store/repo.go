@@ -799,6 +799,25 @@ func (s *Store) CloseAgentSession(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+func (s *Store) CloseAgentSessionsByTableID(ctx context.Context, tableID string) error {
+	_, err := s.q.CloseAgentSessionsByTableID(ctx, tableID)
+	return err
+}
+
+func (s *Store) MarkTableStatusByID(ctx context.Context, tableID, status string) error {
+	rows, err := s.q.MarkTableStatusByID(ctx, sqlcgen.MarkTableStatusByIDParams{
+		ID:     tableID,
+		Status: status,
+	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) InsertAgentActionRequest(ctx context.Context, req AgentActionRequest) (bool, error) {
 	if req.ID == "" {
 		req.ID = NewID()

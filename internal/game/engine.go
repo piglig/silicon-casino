@@ -22,7 +22,7 @@ func NewEngine(store *store.Store, ledger *ledger.Ledger, tableID string, sb, bb
 		SmallBlind:    sb,
 		BigBlind:      bb,
 		MinRaise:      bb,
-		ActionTimeout: 5 * time.Second,
+		ActionTimeout: 30 * time.Second,
 		DealerPos:     0,
 	}
 	return &Engine{Store: store, Ledger: ledger, State: state}

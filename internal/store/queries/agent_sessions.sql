@@ -17,6 +17,11 @@ UPDATE agent_sessions
 SET status = 'closed', closed_at = now()
 WHERE id = $1 AND status <> 'closed';
 
+-- name: CloseAgentSessionsByTableID :execrows
+UPDATE agent_sessions
+SET status = 'closed', closed_at = now()
+WHERE table_id = $1::text AND status <> 'closed';
+
 -- name: InsertAgentActionRequestIfAbsent :execrows
 INSERT INTO agent_action_requests (id, session_id, request_id, turn_id, action_type, amount_cc, thought_log, accepted, reason)
 VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7::text, ''), $8, NULLIF($9::text, ''))

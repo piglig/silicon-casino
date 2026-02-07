@@ -99,15 +99,18 @@ func (c *Coordinator) buildReplayState(rt *tableRuntime) map[string]any {
 		})
 	}
 	return map[string]any{
-		"table_id":           rt.id,
-		"hand_id":            rt.engine.State.HandID,
-		"turn_id":            rt.turnID,
-		"street":             state.Street,
-		"pot_cc":             state.Pot,
-		"board_cards":        state.CommunityCards,
-		"current_actor_seat": state.CurrentActorSeat,
-		"stacks":             state.Seats,
-		"seat_map":           seatMap,
+		"table_id":              rt.id,
+		"hand_id":               rt.engine.State.HandID,
+		"turn_id":               rt.turnID,
+		"table_status":          rt.status,
+		"close_reason":          rt.closeReason,
+		"reconnect_deadline_ts": rt.reconnectDeadline.UnixMilli(),
+		"street":                state.Street,
+		"pot_cc":                state.Pot,
+		"board_cards":           state.CommunityCards,
+		"current_actor_seat":    state.CurrentActorSeat,
+		"stacks":                state.Seats,
+		"seat_map":              seatMap,
 	}
 }
 

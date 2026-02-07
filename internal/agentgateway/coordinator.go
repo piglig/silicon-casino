@@ -15,14 +15,25 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-const sessionTTL = 2 * time.Hour
+const (
+	sessionTTL               = 2 * time.Hour
+	tableStatusActive        = "active"
+	tableStatusClosing       = "closing"
+	tableStatusClosed        = "closed"
+	defaultReconnectGrace    = 30 * time.Second
+	coordinatorSweepInterval = 500 * time.Millisecond
+)
+
+var reconnectGracePeriod = defaultReconnectGrace
 
 type sessionState struct {
-	session store.AgentSession
-	agent   *store.Agent
-	runtime *tableRuntime
-	seat    int
-	buffer  *EventBuffer
+	session            store.AgentSession
+	agent              *store.Agent
+	runtime            *tableRuntime
+	seat               int
+	buffer             *EventBuffer
+	disconnected       bool
+	disconnectedReason string
 }
 
 type Coordinator struct {
@@ -48,15 +59,22 @@ func NewCoordinator(st *store.Store, led *ledger.Ledger) *Coordinator {
 }
 
 func (c *Coordinator) StartJanitor(ctx context.Context, interval time.Duration) {
-	ticker := time.NewTicker(interval)
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	expiryTicker := time.NewTicker(interval)
+	sweepTicker := time.NewTicker(coordinatorSweepInterval)
 	go func() {
-		defer ticker.Stop()
+		defer expiryTicker.Stop()
+		defer sweepTicker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case now := <-ticker.C:
+			case now := <-expiryTicker.C:
 				_ = c.expireSessions(ctx, now)
+			case now := <-sweepTicker.C:
+				c.sweepTableTransitions(ctx, now)
 			}
 		}
 	}()
@@ -67,6 +85,18 @@ func (c *Coordinator) CreateSession(ctx context.Context, req CreateSessionReques
 	if err != nil {
 		return nil, err
 	}
+
+	c.mu.Lock()
+	if old := c.byAgent[agent.ID]; old != nil && old.session.Status != "closed" {
+		if c.tryReconnectSessionLocked(ctx, old) {
+			res := c.responseForSessionLocked(old)
+			c.mu.Unlock()
+			return res, nil
+		}
+		c.mu.Unlock()
+		return nil, errors.New("agent_already_in_session")
+	}
+	c.mu.Unlock()
 
 	room, code := c.selectRoom(ctx, agent.ID, req)
 	if room == nil {
@@ -84,11 +114,6 @@ func (c *Coordinator) CreateSession(ctx context.Context, req CreateSessionReques
 	}
 
 	c.mu.Lock()
-	if old := c.byAgent[agent.ID]; old != nil && old.session.Status != "closed" {
-		c.mu.Unlock()
-		return nil, errors.New("agent_already_in_session")
-	}
-
 	waiter := c.waiting[room.ID]
 	if waiter == nil {
 		ss := &sessionState{session: sess, agent: agent, buffer: NewEventBuffer(500)}
@@ -122,6 +147,8 @@ func (c *Coordinator) CreateSession(ctx context.Context, req CreateSessionReques
 	waiter.session.TableID = tableID
 	waiter.session.SeatID = &seat0
 	waiter.session.Status = "active"
+	waiter.disconnected = false
+	waiter.disconnectedReason = ""
 	waiter.seat = seat0
 	second.session.TableID = tableID
 	second.session.SeatID = &seat1
@@ -151,6 +178,7 @@ func (c *Coordinator) CreateSession(ctx context.Context, req CreateSessionReques
 		c.mu.Unlock()
 		return nil, err
 	}
+
 	rt, err := c.startTableRuntime(ctx, tableID, room, waiter, second)
 	if err != nil {
 		log.Error().
@@ -191,35 +219,243 @@ func (c *Coordinator) CloseSession(ctx context.Context, sessionID string) error 
 }
 
 func (c *Coordinator) CloseSessionWithReason(ctx context.Context, sessionID, reason string) error {
-	var rt *tableRuntime
-	var shouldEmitTableClosed bool
 	c.mu.Lock()
 	sess := c.sessions[sessionID]
-	if sess != nil {
-		rt = sess.runtime
-		if rt != nil && !rt.replayClosed {
-			rt.replayClosed = true
-			shouldEmitTableClosed = true
+	if sess == nil {
+		c.mu.Unlock()
+		return c.store.CloseAgentSession(ctx, sessionID)
+	}
+
+	if sess.runtime != nil {
+		rt := sess.runtime
+		sess.disconnected = true
+		sess.disconnectedReason = reason
+		c.mu.Unlock()
+		c.beginReconnectGrace(ctx, rt, sess.seat, reason)
+		return nil
+	}
+
+	if sess.buffer != nil {
+		sess.buffer.Append("session_closed", sessionID, map[string]any{"reason": reason})
+		sess.buffer.Close()
+	}
+	delete(c.sessions, sessionID)
+	if sess.agent != nil {
+		delete(c.byAgent, sess.agent.ID)
+	}
+	if wait := c.waiting[sess.session.RoomID]; wait == sess {
+		delete(c.waiting, sess.session.RoomID)
+	}
+	sess.session.Status = "closed"
+	c.mu.Unlock()
+	return c.store.CloseAgentSession(ctx, sessionID)
+}
+
+func (c *Coordinator) beginReconnectGrace(ctx context.Context, rt *tableRuntime, forfeiterSeat int, reason string) {
+	if rt == nil {
+		return
+	}
+	var disconnectedAgentID string
+	now := time.Now()
+	graceDeadline := now.Add(reconnectGracePeriod)
+
+	rt.mu.Lock()
+	if rt.status == tableStatusClosed {
+		rt.mu.Unlock()
+		return
+	}
+	if rt.status == tableStatusClosing {
+		rt.mu.Unlock()
+		return
+	}
+	if forfeiterSeat < 0 || forfeiterSeat > 1 {
+		forfeiterSeat = rt.engine.State.CurrentActor
+	}
+	rt.status = tableStatusClosing
+	rt.closeReason = reason
+	rt.disconnectedSeat = forfeiterSeat
+	rt.reconnectDeadline = graceDeadline
+	rt.turnDeadline = time.Time{}
+	rt.turnSeat = -1
+	if p := rt.players[forfeiterSeat]; p != nil {
+		disconnectedAgentID = p.agent.ID
+	}
+	c.appendReplayEvent(ctx, rt, "reconnect_grace_started", "", map[string]any{
+		"table_id":              rt.id,
+		"disconnected_agent_id": disconnectedAgentID,
+		"grace_ms":              reconnectGracePeriod.Milliseconds(),
+		"deadline_ts":           graceDeadline.UnixMilli(),
+		"reason":                reason,
+	})
+	for _, p := range rt.players {
+		if p == nil || p.buffer == nil {
+			continue
 		}
-		if sess.buffer != nil {
-			sess.buffer.Append("session_closed", sessionID, map[string]any{"reason": reason})
-			sess.buffer.Close()
+		p.buffer.Append("reconnect_grace_started", p.session.ID, map[string]any{
+			"table_id":              rt.id,
+			"disconnected_agent_id": disconnectedAgentID,
+			"grace_ms":              reconnectGracePeriod.Milliseconds(),
+			"deadline_ts":           graceDeadline.UnixMilli(),
+		})
+	}
+	if rt.publicBuffer != nil {
+		rt.publicBuffer.Append("reconnect_grace_started", rt.id, map[string]any{
+			"table_id":              rt.id,
+			"disconnected_agent_id": disconnectedAgentID,
+			"grace_ms":              reconnectGracePeriod.Milliseconds(),
+			"deadline_ts":           graceDeadline.UnixMilli(),
+			"reason":                reason,
+		})
+	}
+	rt.mu.Unlock()
+
+	_ = c.store.MarkTableStatusByID(ctx, rt.id, tableStatusClosing)
+	for _, p := range rt.players {
+		c.emitStateSnapshot(p)
+	}
+	c.emitPublicSnapshot(rt)
+}
+
+func (c *Coordinator) closeTableWithForfeit(ctx context.Context, rt *tableRuntime, forfeiterSeat int, reason string) {
+	if rt == nil {
+		return
+	}
+
+	var sessionsToClose []string
+	var tableID string
+	var winnerID string
+	var pot int64
+
+	rt.mu.Lock()
+	if rt.status == tableStatusClosed {
+		rt.mu.Unlock()
+		return
+	}
+	if forfeiterSeat < 0 || forfeiterSeat > 1 {
+		if rt.disconnectedSeat >= 0 && rt.disconnectedSeat <= 1 {
+			forfeiterSeat = rt.disconnectedSeat
+		} else {
+			forfeiterSeat = rt.engine.State.CurrentActor
 		}
-		delete(c.sessions, sessionID)
-		if sess.agent != nil {
-			delete(c.byAgent, sess.agent.ID)
+	}
+	winnerSeat := 1 - forfeiterSeat
+	forfeiter := rt.players[forfeiterSeat]
+	winner := rt.players[winnerSeat]
+	if rt.engine.State.Players[forfeiterSeat] != nil {
+		rt.engine.State.Players[forfeiterSeat].Folded = true
+	}
+	winnerID, _ = rt.engine.Settle(ctx)
+	if winnerID == "" && winner != nil {
+		winnerID = winner.agent.ID
+	}
+	pot = rt.engine.State.Pot
+	tableID = rt.id
+
+	forfeiterAgentID := ""
+	if forfeiter != nil {
+		forfeiterAgentID = forfeiter.agent.ID
+	}
+	c.appendReplayEvent(ctx, rt, "opponent_forfeited", winnerID, map[string]any{
+		"table_id":           rt.id,
+		"forfeiter_agent_id": forfeiterAgentID,
+		"winner_agent_id":    winnerID,
+		"reason":             reason,
+	})
+	c.appendReplayEvent(ctx, rt, "hand_settled", winnerID, map[string]any{
+		"hand_id": rt.engine.State.HandID,
+		"winner":  winnerID,
+		"pot_cc":  pot,
+		"street":  string(rt.engine.State.Street),
+	})
+	c.appendReplayEvent(ctx, rt, "table_closed", "", map[string]any{"reason": reason})
+
+	rt.status = tableStatusClosed
+	rt.closeReason = reason
+	rt.reconnectDeadline = time.Time{}
+	rt.disconnectedSeat = -1
+	rt.turnDeadline = time.Time{}
+	rt.turnSeat = -1
+	rt.replayClosed = true
+
+	for _, p := range rt.players {
+		if p == nil {
+			continue
 		}
-		if wait := c.waiting[sess.session.RoomID]; wait == sess {
-			delete(c.waiting, sess.session.RoomID)
+		p.session.Status = "closed"
+		p.disconnected = false
+		p.disconnectedReason = ""
+		sessionsToClose = append(sessionsToClose, p.session.ID)
+		if p.buffer != nil {
+			p.buffer.Append("opponent_forfeited", p.session.ID, map[string]any{
+				"table_id":           rt.id,
+				"forfeiter_agent_id": forfeiterAgentID,
+				"winner_agent_id":    winnerID,
+				"reason":             reason,
+			})
+			p.buffer.Append("table_closed", p.session.ID, map[string]any{"table_id": rt.id, "reason": reason})
+			p.buffer.Append("session_closed", p.session.ID, map[string]any{"reason": reason})
+			p.buffer.Close()
+		}
+	}
+	if rt.publicBuffer != nil {
+		rt.publicBuffer.Append("opponent_forfeited", rt.id, map[string]any{
+			"table_id":           rt.id,
+			"forfeiter_agent_id": forfeiterAgentID,
+			"winner_agent_id":    winnerID,
+			"reason":             reason,
+		})
+		rt.publicBuffer.Append("table_closed", rt.id, map[string]any{"table_id": rt.id, "reason": reason})
+		rt.publicBuffer.Close()
+	}
+	rt.mu.Unlock()
+
+	_ = c.store.EndHandWithSummary(ctx, rt.engine.State.HandID, winnerID, &pot, string(rt.engine.State.Street))
+	_ = c.store.MarkTableStatusByID(ctx, tableID, tableStatusClosed)
+	_ = c.store.CloseAgentSessionsByTableID(ctx, tableID)
+
+	c.mu.Lock()
+	delete(c.tables, tableID)
+	for _, p := range rt.players {
+		if p == nil {
+			continue
+		}
+		delete(c.sessions, p.session.ID)
+		if p.agent != nil {
+			delete(c.byAgent, p.agent.ID)
 		}
 	}
 	c.mu.Unlock()
-	if shouldEmitTableClosed {
-		rt.mu.Lock()
-		c.appendReplayEvent(ctx, rt, "table_closed", "", map[string]any{"reason": reason})
-		rt.mu.Unlock()
+
+	for _, sessionID := range sessionsToClose {
+		_ = c.store.CloseAgentSession(ctx, sessionID)
 	}
-	return c.store.CloseAgentSession(ctx, sessionID)
+}
+
+func (c *Coordinator) sweepTableTransitions(ctx context.Context, now time.Time) {
+	c.mu.Lock()
+	tables := make([]*tableRuntime, 0, len(c.tables))
+	for _, rt := range c.tables {
+		tables = append(tables, rt)
+	}
+	c.mu.Unlock()
+
+	for _, rt := range tables {
+		rt.mu.Lock()
+		status := rt.status
+		turnExpired := status == tableStatusActive && !rt.turnDeadline.IsZero() && now.After(rt.turnDeadline)
+		graceExpired := status == tableStatusClosing && !rt.reconnectDeadline.IsZero() && now.After(rt.reconnectDeadline)
+		turnSeat := rt.turnSeat
+		disconnectedSeat := rt.disconnectedSeat
+		rt.mu.Unlock()
+
+		if turnExpired {
+			c.beginReconnectGrace(ctx, rt, turnSeat, "opponent_action_timeout")
+			continue
+		}
+		if graceExpired {
+			c.closeTableWithForfeit(ctx, rt, disconnectedSeat, "opponent_reconnect_timeout")
+		}
+	}
 }
 
 func (c *Coordinator) expireSessions(ctx context.Context, now time.Time) int {
@@ -258,6 +494,13 @@ func (c *Coordinator) FindOpenSessionByAgent(agentID string) (*CreateSessionResp
 	if sess == nil || sess.session.Status == "closed" {
 		return nil, false
 	}
+	return c.responseForSessionLocked(sess), true
+}
+
+func (c *Coordinator) responseForSessionLocked(sess *sessionState) *CreateSessionResponse {
+	if sess == nil {
+		return nil
+	}
 	res := &CreateSessionResponse{
 		SessionID: sess.session.ID,
 		TableID:   sess.session.TableID,
@@ -266,18 +509,75 @@ func (c *Coordinator) FindOpenSessionByAgent(agentID string) (*CreateSessionResp
 		StreamURL: "/api/agent/sessions/" + sess.session.ID + "/events",
 		ExpiresAt: sess.session.ExpiresAt,
 	}
-	return res, true
+	return res
+}
+
+func (c *Coordinator) tryReconnectSessionLocked(ctx context.Context, sess *sessionState) bool {
+	if sess == nil || sess.runtime == nil || !sess.disconnected {
+		return false
+	}
+	rt := sess.runtime
+	now := time.Now()
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.status != tableStatusClosing {
+		return false
+	}
+	if rt.disconnectedSeat != sess.seat {
+		return false
+	}
+	if !rt.reconnectDeadline.IsZero() && now.After(rt.reconnectDeadline) {
+		return false
+	}
+	sess.disconnected = false
+	sess.disconnectedReason = ""
+	sess.session.ExpiresAt = now.Add(sessionTTL)
+	rt.status = tableStatusActive
+	rt.closeReason = ""
+	rt.reconnectDeadline = time.Time{}
+	rt.disconnectedSeat = -1
+	rt.turnSeat = rt.engine.State.CurrentActor
+	rt.turnDeadline = now.Add(rt.engine.State.ActionTimeout)
+	c.appendReplayEvent(ctx, rt, "opponent_reconnected", sess.agent.ID, map[string]any{
+		"table_id": rt.id,
+		"agent_id": sess.agent.ID,
+	})
+	for _, p := range rt.players {
+		if p == nil || p.buffer == nil {
+			continue
+		}
+		p.buffer.Append("opponent_reconnected", p.session.ID, map[string]any{
+			"table_id": rt.id,
+			"agent_id": sess.agent.ID,
+		})
+	}
+	if rt.publicBuffer != nil {
+		rt.publicBuffer.Append("opponent_reconnected", rt.id, map[string]any{
+			"table_id": rt.id,
+			"agent_id": sess.agent.ID,
+		})
+	}
+	for _, p := range rt.players {
+		c.emitStateSnapshot(p)
+	}
+	c.emitTurnStarted(rt)
+	c.emitPublicSnapshot(rt)
+	_ = c.store.MarkTableStatusByID(ctx, rt.id, tableStatusActive)
+	return true
 }
 
 func (c *Coordinator) startTableRuntime(ctx context.Context, tableID string, room *store.Room, p0, p1 *sessionState) (*tableRuntime, error) {
 	engine := game.NewEngine(c.store, c.ledger, tableID, room.SmallBlindCC, room.BigBlindCC)
 	rt := &tableRuntime{
-		id:           tableID,
-		room:         room,
-		engine:       engine,
-		players:      [2]*sessionState{p0, p1},
-		turnID:       nextTurnID(),
-		publicBuffer: NewEventBuffer(500),
+		id:               tableID,
+		room:             room,
+		engine:           engine,
+		players:          [2]*sessionState{p0, p1},
+		turnID:           nextTurnID(),
+		publicBuffer:     NewEventBuffer(500),
+		status:           tableStatusActive,
+		disconnectedSeat: -1,
+		turnSeat:         -1,
 	}
 	players := [2]*game.Player{
 		{ID: p0.agent.ID, Name: p0.agent.Name, Seat: 0},
@@ -287,6 +587,8 @@ func (c *Coordinator) startTableRuntime(ctx context.Context, tableID string, roo
 		return nil, err
 	}
 	rt.turnID = nextTurnID()
+	rt.turnSeat = rt.engine.State.CurrentActor
+	rt.turnDeadline = time.Now().Add(rt.engine.State.ActionTimeout)
 	c.initReplayRuntime(ctx, rt)
 	return rt, nil
 }
@@ -339,6 +641,12 @@ type tableRuntime struct {
 	snapshotInterval    int32
 	replayClosed        bool
 	publicBuffer        *EventBuffer
+	status              string
+	closeReason         string
+	reconnectDeadline   time.Time
+	disconnectedSeat    int
+	turnDeadline        time.Time
+	turnSeat            int
 	mu                  sync.Mutex
 }
 

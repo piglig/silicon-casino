@@ -16,19 +16,22 @@ type SeatView struct {
 }
 
 type AgentStateView struct {
-	HandID            string             `json:"hand_id"`
-	Street            string             `json:"street"`
-	Pot               int64              `json:"pot"`
-	CommunityCards    []string           `json:"community_cards"`
-	CurrentActorSeat  int                `json:"current_actor_seat"`
-	TurnID            string             `json:"turn_id"`
-	ActionTimeoutMS   int64              `json:"action_timeout_ms"`
-	MySeat            int                `json:"my_seat"`
-	MyBalance         int64              `json:"my_balance"`
-	MyHoleCards       []string           `json:"my_hole_cards"`
-	LegalActions      []string           `json:"legal_actions,omitempty"`
-	ActionConstraints *ActionConstraints `json:"action_constraints,omitempty"`
-	Seats             []SeatView         `json:"seats"`
+	HandID              string             `json:"hand_id"`
+	Street              string             `json:"street"`
+	Pot                 int64              `json:"pot"`
+	CommunityCards      []string           `json:"community_cards"`
+	CurrentActorSeat    int                `json:"current_actor_seat"`
+	TurnID              string             `json:"turn_id"`
+	ActionTimeoutMS     int64              `json:"action_timeout_ms"`
+	MySeat              int                `json:"my_seat"`
+	MyBalance           int64              `json:"my_balance"`
+	MyHoleCards         []string           `json:"my_hole_cards"`
+	LegalActions        []string           `json:"legal_actions,omitempty"`
+	ActionConstraints   *ActionConstraints `json:"action_constraints,omitempty"`
+	Seats               []SeatView         `json:"seats"`
+	TableStatus         string             `json:"table_status,omitempty"`
+	ReconnectDeadlineTS int64              `json:"reconnect_deadline_ts,omitempty"`
+	CloseReason         string             `json:"close_reason,omitempty"`
 }
 
 type BetConstraint struct {
@@ -47,13 +50,16 @@ type ActionConstraints struct {
 }
 
 type PublicStateView struct {
-	HandID           string     `json:"hand_id"`
-	Street           string     `json:"street"`
-	Pot              int64      `json:"pot"`
-	CommunityCards   []string   `json:"community_cards"`
-	CurrentActorSeat int        `json:"current_actor_seat"`
-	ActionTimeoutMS  int64      `json:"action_timeout_ms"`
-	Seats            []SeatView `json:"seats"`
+	HandID              string     `json:"hand_id"`
+	Street              string     `json:"street"`
+	Pot                 int64      `json:"pot"`
+	CommunityCards      []string   `json:"community_cards"`
+	CurrentActorSeat    int        `json:"current_actor_seat"`
+	ActionTimeoutMS     int64      `json:"action_timeout_ms"`
+	Seats               []SeatView `json:"seats"`
+	TableStatus         string     `json:"table_status,omitempty"`
+	ReconnectDeadlineTS int64      `json:"reconnect_deadline_ts,omitempty"`
+	CloseReason         string     `json:"close_reason,omitempty"`
 }
 
 func BuildAgentState(st *game.TableState, mySeat int, turnID string, includeOthersHole bool) AgentStateView {

@@ -25,6 +25,20 @@ func (q *Queries) CloseAgentSession(ctx context.Context, id string) (int64, erro
 	return result.RowsAffected(), nil
 }
 
+const closeAgentSessionsByTableID = `-- name: CloseAgentSessionsByTableID :execrows
+UPDATE agent_sessions
+SET status = 'closed', closed_at = now()
+WHERE table_id = $1::text AND status <> 'closed'
+`
+
+func (q *Queries) CloseAgentSessionsByTableID(ctx context.Context, dollar_1 string) (int64, error) {
+	result, err := q.db.Exec(ctx, closeAgentSessionsByTableID, dollar_1)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countAgentActionRequestsBySessionAndRequest = `-- name: CountAgentActionRequestsBySessionAndRequest :one
 SELECT COUNT(*)::int
 FROM agent_action_requests

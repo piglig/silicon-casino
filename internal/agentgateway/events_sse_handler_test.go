@@ -129,6 +129,9 @@ func TestEventsSSEHeartbeatAndSessionClosed(t *testing.T) {
 	prev := ssePingInterval
 	ssePingInterval = 20 * time.Millisecond
 	defer func() { ssePingInterval = prev }()
+	prevGrace := reconnectGracePeriod
+	reconnectGracePeriod = 30 * time.Millisecond
+	defer func() { reconnectGracePeriod = prevGrace }()
 
 	coord, s1ID, _ := setupMatchedSessions(t)
 	router := chi.NewRouter()
@@ -162,8 +165,21 @@ func TestEventsSSEHeartbeatAndSessionClosed(t *testing.T) {
 	if err := coord.CloseSession(context.Background(), s1ID); err != nil {
 		t.Fatalf("close session: %v", err)
 	}
-	var sawClosed bool
+	var sawGrace bool
 	for i := 0; i < 10; i++ {
+		ev := readEventWithTimeout(t, rd, time.Second)
+		if ev.Event == "reconnect_grace_started" {
+			sawGrace = true
+			break
+		}
+	}
+	if !sawGrace {
+		t.Fatal("expected reconnect_grace_started event")
+	}
+	time.Sleep(50 * time.Millisecond)
+	coord.sweepTableTransitions(context.Background(), time.Now())
+	var sawClosed bool
+	for i := 0; i < 20; i++ {
 		ev := readEventWithTimeout(t, rd, time.Second)
 		if ev.Event == "session_closed" {
 			sawClosed = true
@@ -171,7 +187,7 @@ func TestEventsSSEHeartbeatAndSessionClosed(t *testing.T) {
 		}
 	}
 	if !sawClosed {
-		t.Fatal("expected session_closed event")
+		t.Fatal("expected session_closed event after grace timeout")
 	}
 }
 

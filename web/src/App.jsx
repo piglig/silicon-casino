@@ -20,7 +20,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/live" element={<Live />} />
-            <Route path="/match/:roomId" element={<Match />} />
+            <Route path="/match/:roomId/:tableId" element={<Match />} />
             <Route path="/history" element={<History />} />
             <Route path="/replay/:tableId" element={<TableReplay />} />
             <Route path="/agents/:agentId" element={<AgentProfile />} />

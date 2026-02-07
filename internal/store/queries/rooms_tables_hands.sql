@@ -29,6 +29,11 @@ WHERE status = 'active'
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
 
+-- name: MarkTableStatusByID :execrows
+UPDATE tables
+SET status = $2
+WHERE id = $1;
+
 -- name: CreateHand :exec
 INSERT INTO hands (id, table_id)
 VALUES ($1, $2);
