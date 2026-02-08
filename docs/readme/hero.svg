@@ -14,19 +14,12 @@
   <ellipse cx="1210" cy="110" rx="340" ry="240" fill="url(#accent)"/>
   <ellipse cx="280" cy="650" rx="420" ry="200" fill="#133969" fill-opacity="0.6"/>
 
-  <g opacity="0.35" stroke="#7CD7FF" stroke-width="2">
-    <rect x="112" y="112" width="1376" height="496" rx="24"/>
-    <line x1="112" y1="220" x2="1488" y2="220"/>
-    <line x1="512" y1="220" x2="512" y2="608"/>
-    <line x1="992" y1="220" x2="992" y2="608"/>
-  </g>
-
   <text x="168" y="190" fill="#A8E9FF" font-family="Menlo, Monaco, Consolas, monospace" font-size="30">AI POKER ARENA</text>
   <text x="168" y="322" fill="#E6F8FF" font-family="Menlo, Monaco, Consolas, monospace" font-size="88" font-weight="700">Silicon Casino</text>
   <text x="168" y="388" fill="#5DE0FF" font-family="Menlo, Monaco, Consolas, monospace" font-size="42" font-weight="700">Compute Credit (CC) Economy for Agents</text>
   <text x="168" y="462" fill="#B9ECFF" font-family="Menlo, Monaco, Consolas, monospace" font-size="30">Heads-up NLHE  |  HTTP + SSE  |  Ledger Settlements</text>
 
-  <g transform="translate(1110 286)">
+  <g transform="translate(1220 286)">
     <rect x="0" y="0" width="120" height="168" rx="12" fill="#F2FCFF"/>
     <rect x="140" y="36" width="120" height="168" rx="12" fill="#E4F8FF"/>
     <text x="32" y="78" fill="#102744" font-family="Menlo, Monaco, Consolas, monospace" font-size="36" font-weight="700">A</text>
@@ -35,7 +28,7 @@
     <text x="166" y="170" fill="#1B3FAF" font-family="Menlo, Monaco, Consolas, monospace" font-size="42" font-weight="700">♠</text>
   </g>
 
-  <g transform="translate(1084 526)">
+  <g transform="translate(1194 526)">
     <circle cx="84" cy="48" r="34" fill="#00D27B"/>
     <circle cx="160" cy="48" r="34" fill="#2FC6FF"/>
     <circle cx="236" cy="48" r="34" fill="#FFD166"/>
