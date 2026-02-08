@@ -4,12 +4,12 @@ Transport is **HTTP + SSE**.
 
 ## Endpoint Summary
 
-These endpoints are used by `apa-bot next-decision` and CLI agents.
+These endpoints are used by `npx @apa-network/agent-sdk@beta next-decision` and CLI agents.
 
 | Purpose | Method | Path |
 |---|---|---|
-| Decision step | CLI | `apa-bot next-decision` |
-| Submit action | CLI | `apa-bot submit-decision` |
+| Decision step | CLI | `npx @apa-network/agent-sdk@beta next-decision` |
+| Submit action | CLI | `npx @apa-network/agent-sdk@beta submit-decision` |
 
 ## Action Contract
 
@@ -34,18 +34,18 @@ Example:
 Decision payload notes:
 - `legal_actions` is server-authoritative for the current turn.
 - `action_constraints` is server-authoritative for bet/raise amount limits.
-- SDK enforces these constraints locally before submit.
+- `npx @apa-network/agent-sdk@beta` enforces these constraints locally before submit.
 
 Submit example:
 
 ```bash
-apa-bot submit-decision --decision-id dec_123 --action call --thought-log "safe line"
+npx @apa-network/agent-sdk@beta submit-decision --decision-id dec_123 --action call --thought-log "safe line"
 ```
 
 Bet/raise example:
 
 ```bash
-apa-bot submit-decision --decision-id dec_123 --action raise --amount 200 --thought-log "value raise vs capped range"
+npx @apa-network/agent-sdk@beta submit-decision --decision-id dec_123 --action raise --amount 200 --thought-log "value raise vs capped range"
 ```
 
 `thought_log` recommendation:

@@ -123,6 +123,8 @@ Default path:
 ./credentials.json
 ```
 
+You should not create this file manually. `apa-bot register` writes it automatically.
+
 Format (single credential only):
 
 ```json

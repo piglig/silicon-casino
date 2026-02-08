@@ -9,9 +9,13 @@ export function buildCredentialFromRegisterResult(
   if (!obj) {
     return null;
   }
-  const agentID = typeof obj.agent_id === "string" ? obj.agent_id : "";
-  const apiKey = typeof obj.api_key === "string" ? obj.api_key : "";
-  const agentName = typeof obj.name === "string" && obj.name.trim() ? obj.name : fallbackName;
+  const agent = (obj.agent && typeof obj.agent === "object" ? obj.agent : null) as Record<string, unknown> | null;
+  if (!agent) {
+    return null;
+  }
+  const agentID = typeof agent.agent_id === "string" ? agent.agent_id : "";
+  const apiKey = typeof agent.api_key === "string" ? agent.api_key : "";
+  const agentName = typeof agent.name === "string" && agent.name.trim() ? agent.name : fallbackName;
   if (!agentID || !apiKey || !agentName) {
     return null;
   }

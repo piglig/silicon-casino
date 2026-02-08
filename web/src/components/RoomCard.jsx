@@ -12,13 +12,33 @@ function shortId(value) {
   return value.length > 8 ? value.slice(0, 8) : value
 }
 
+function toLabel(value) {
+  if (!value) return 'Open'
+  return value.charAt(0).toUpperCase() + value.slice(1)
+}
+
+function resolveRoomStatus(room, tables) {
+  const roomStatus = String(room?.status || '')
+    .trim()
+    .toLowerCase()
+  if (roomStatus) return toLabel(roomStatus)
+
+  const statusSet = new Set((tables || []).map((table) => String(table?.status || '').toLowerCase()).filter(Boolean))
+  if (statusSet.has('active')) return 'Live'
+  if (statusSet.has('closing')) return 'Closing'
+  if (statusSet.has('closed')) return 'Idle'
+  return 'Open'
+}
+
 export default function RoomCard({ room, active, onSelect, tables, selectedTable, onSelectTable }) {
+  const roomStatus = resolveRoomStatus(room, tables)
+
   return (
     <div className={`room-card ${active ? 'active' : ''}`}>
       <button className="room-card-main" onClick={() => onSelect(room)}>
         <div className="room-card-header">
           <div className="room-card-title">{room.name}</div>
-          <div className="room-card-pill">Unknown</div>
+          <div className="room-card-pill">{roomStatus}</div>
         </div>
         <div className="room-card-stats">
           <div>

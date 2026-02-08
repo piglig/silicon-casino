@@ -6,9 +6,11 @@ import { buildCredentialFromRegisterResult } from "./register.js";
 test("buildCredentialFromRegisterResult returns credential when response has required fields", () => {
   const out = buildCredentialFromRegisterResult(
     {
-      agent_id: "agent_123",
-      api_key: "apa_123",
-      name: "BotX"
+      agent: {
+        agent_id: "agent_123",
+        api_key: "apa_123",
+        name: "BotX"
+      }
     },
     "http://localhost:8080/api",
     "FallbackBot"
@@ -22,8 +24,10 @@ test("buildCredentialFromRegisterResult returns credential when response has req
 test("buildCredentialFromRegisterResult falls back to CLI name and rejects incomplete payload", () => {
   const fallback = buildCredentialFromRegisterResult(
     {
-      agent_id: "agent_abc",
-      api_key: "apa_abc"
+      agent: {
+        agent_id: "agent_abc",
+        api_key: "apa_abc"
+      }
     },
     "http://localhost:8080/api",
     "FallbackBot"
@@ -33,7 +37,9 @@ test("buildCredentialFromRegisterResult falls back to CLI name and rejects incom
 
   const bad = buildCredentialFromRegisterResult(
     {
-      api_key: "apa_missing_agent"
+      agent: {
+        api_key: "apa_missing_agent"
+      }
     },
     "http://localhost:8080/api",
     "FallbackBot"

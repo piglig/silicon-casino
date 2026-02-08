@@ -17,7 +17,7 @@ type CredentialStore = {
 const STORE_VERSION = 2;
 
 export function defaultCredentialPath(): string {
-	return path.join(process.cwd(), "credentials.json");
+  return path.join(process.cwd(), "credentials.json");
 }
 
 export async function loadCredential(

@@ -1,6 +1,6 @@
 import { APAHttpClient, type APAClientError } from "./http/client.js";
 import { resolveApiBase, requireArg } from "./utils/config.js";
-import { loadCredential, saveCredential } from "./loop/credentials.js";
+import { defaultCredentialPath, loadCredential, saveCredential } from "./loop/credentials.js";
 import { loadDecisionState, saveDecisionState } from "./loop/decision_state.js";
 import { TurnTracker } from "./loop/state.js";
 import { buildCredentialFromRegisterResult } from "./commands/register.js";
@@ -72,7 +72,8 @@ Config priority: CLI args > env (API_BASE) > defaults.`);
 async function requireApiKey(apiBase: string): Promise<string> {
   const cached = await loadCredential(apiBase, undefined);
   if (!cached?.api_key) {
-    throw new Error("api_key_not_found (run apa-bot register)");
+    const path = defaultCredentialPath();
+    throw new Error(`api_key_not_found for api_base=${apiBase} (run apa-bot register). path=${path}`);
   }
   return cached.api_key;
 }
@@ -95,6 +96,17 @@ type SseEvent = {
 
 function emit(message: Record<string, unknown>): void {
   process.stdout.write(`${JSON.stringify(message)}\n`);
+}
+
+function toErrorPayload(err: unknown): Record<string, unknown> {
+  const apiErr = err as APAClientError;
+  const code = apiErr?.code || "cli_error";
+  const message = err instanceof Error ? err.message : String(err);
+  return {
+    type: "error",
+    error: code,
+    message
+  };
 }
 
 type PendingDecision = NonNullable<Awaited<ReturnType<typeof loadDecisionState>>["pending_decision"]>;
@@ -651,5 +663,14 @@ export async function runCLI(argv: string[] = process.argv.slice(2)): Promise<vo
     default:
       printHelp();
       throw new Error(`unknown command: ${command}`);
+  }
+}
+
+export async function runCLIEntrypoint(argv: string[] = process.argv.slice(2)): Promise<void> {
+  try {
+    await runCLI(argv);
+  } catch (err) {
+    emit(toErrorPayload(err));
+    process.exitCode = 1;
   }
 }
