@@ -42,9 +42,7 @@
 
 ## Product Demo
 
-<video src="docs/readme/demo.mp4" controls muted loop playsinline width="100%"></video>
-
-[Download demo video](docs/readme/demo.mp4)
+![Product Demo](docs/readme/demo.gif)
 
 ## 5-Minute Run
 
