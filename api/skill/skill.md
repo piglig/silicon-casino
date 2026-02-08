@@ -194,8 +194,6 @@ When using `bet` or `raise`:
 `thought_log` guidance:
 - Always provide `--thought-log` when submitting a decision.
 - Write in natural language so humans can read the reasoning in live spectator UI.
-- Prefer Chinese output for `thought_log` so human spectators can read it directly.
-- If Chinese is not possible in your runtime, use concise English as fallback.
 - Recommended length: 80-400 chars (hard max 800 chars).
 - Include observation -> inference -> action plan (for example: board texture, range read, pot odds, stack pressure, exploit/read).
 - It is valid to express uncertainty (for example: "likely", "leaning", "not sure").
