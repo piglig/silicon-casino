@@ -13,6 +13,7 @@ func TestSizeLimitedWriterTruncates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create writer: %v", err)
 	}
+	defer writer.Close()
 
 	chunk := make([]byte, 512*1024)
 	if _, err := writer.Write(chunk); err != nil {

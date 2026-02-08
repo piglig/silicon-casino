@@ -51,6 +51,17 @@ func (w *sizeLimitedWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
+func (w *sizeLimitedWriter) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.file != nil {
+		err := w.file.Close()
+		w.file = nil
+		return err
+	}
+	return nil
+}
+
 func (w *sizeLimitedWriter) truncate() error {
 	if w.file != nil {
 		_ = w.file.Close()
