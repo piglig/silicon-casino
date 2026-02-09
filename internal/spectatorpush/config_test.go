@@ -9,17 +9,20 @@ import (
 )
 
 func TestConfigFromServerFiltersTargets(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "targets.json")
+	raw := `[
+	  {"platform":"discord","endpoint":"https://a","scope_type":"room","scope_value":"mid","enabled":true},
+	  {"platform":"feishu","endpoint":"","scope_type":"room","scope_value":"mid","enabled":true},
+	  {"platform":"discord","endpoint":"https://b","scope_type":"invalid","scope_value":"mid","enabled":true}
+	]`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
 	scfg := config.ServerConfig{
-		SpectatorPushEnabled:               true,
-		SpectatorPushWorkers:               2,
-		SpectatorPushRetryMax:              3,
-		SpectatorPushRetryBaseMS:           200,
-		SpectatorPushSnapshotMinIntervalMS: 1000,
-		SpectatorPushConfigJSON: `[
-		  {"platform":"discord","endpoint":"https://a","scope_type":"room","scope_value":"mid","enabled":true},
-		  {"platform":"feishu","endpoint":"","scope_type":"room","scope_value":"mid","enabled":true},
-		  {"platform":"discord","endpoint":"https://b","scope_type":"invalid","scope_value":"mid","enabled":true}
-		]`,
+		SpectatorPushEnabled:    true,
+		SpectatorPushConfigPath: path,
 	}
 	cfg, err := ConfigFromServer(scfg)
 	if err != nil {
@@ -33,7 +36,7 @@ func TestConfigFromServerFiltersTargets(t *testing.T) {
 	}
 }
 
-func TestConfigFromServerUsesConfigPathFirst(t *testing.T) {
+func TestConfigFromServerUsesConfigPath(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "targets.json")
 	fileJSON := `[{"platform":"discord","endpoint":"https://from-file","scope_type":"room","scope_value":"mid","enabled":true}]`
@@ -44,7 +47,6 @@ func TestConfigFromServerUsesConfigPathFirst(t *testing.T) {
 	scfg := config.ServerConfig{
 		SpectatorPushEnabled:    true,
 		SpectatorPushConfigPath: path,
-		SpectatorPushConfigJSON: `[{"platform":"discord","endpoint":"https://from-env","scope_type":"room","scope_value":"mid","enabled":true}]`,
 	}
 	cfg, err := ConfigFromServer(scfg)
 	if err != nil {

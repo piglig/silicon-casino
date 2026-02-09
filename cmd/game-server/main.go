@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -49,7 +50,6 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("load server config failed")
 	}
-	initial := int64(100000)
 
 	st, err := store.New(cfg.PostgresDSN)
 	if err != nil {
@@ -58,10 +58,6 @@ func main() {
 	if err := st.Ping(context.Background()); err != nil {
 		log.Fatal().Err(err).Msg("db ping failed")
 	}
-
-	// Optional seed from env
-	seedAgent(st, cfg.Agent1Name, cfg.Agent1Key, initial)
-	seedAgent(st, cfg.Agent2Name, cfg.Agent2Key, initial)
 
 	led := ledger.New(st)
 	if err := st.EnsureDefaultRooms(context.Background()); err != nil {
@@ -105,7 +101,6 @@ func newRouter(st *store.Store, cfg config.ServerConfig, agentCoord *agentgatewa
 
 	r.Route("/api", func(r chi.Router) {
 		r.Use(apiLogMiddleware())
-		r.Use(bodyCaptureMiddleware())
 		r.Get("/public/leaderboard", publicLeaderboardHandler(st))
 		r.Get("/public/rooms", publicRoomsHandler(st))
 		r.Get("/public/tables", publicTablesHandler(st))
@@ -138,9 +133,14 @@ func newRouter(st *store.Store, cfg config.ServerConfig, agentCoord *agentgatewa
 			r.Get("/ledger", ledgerHandler(st))
 			r.Post("/topup", topupHandler(st))
 			r.Post("/rooms", roomsHandler(st))
-			r.Get("/debug/vars", expvar.Handler().ServeHTTP)
 			r.MethodFunc(http.MethodGet, "/providers/rates", providerRatesHandler(st))
 			r.MethodFunc(http.MethodPost, "/providers/rates", providerRatesHandler(st))
+
+			r.Route("/debug", func(r chi.Router) {
+				// Body capture is only enabled for debug routes.
+				r.Use(bodyCaptureMiddleware(4096))
+				r.Get("/vars", expvar.Handler().ServeHTTP)
+			})
 		})
 	})
 
@@ -149,10 +149,14 @@ func newRouter(st *store.Store, cfg config.ServerConfig, agentCoord *agentgatewa
 	r.Handle("/api/messaging.md", skillServer)
 	r.Handle("/api/skill.json", skillServer)
 
-	r.With(apiLogMiddleware(), bodyCaptureMiddleware()).Get("/claim/{claim_code}", claimByCodeHandler(st))
+	r.With(apiLogMiddleware()).Get("/claim/{claim_code}", claimByCodeHandler(st))
 
 	staticDir := filepath.Join("internal", "web", "static")
-	r.Handle("/*", http.FileServer(http.Dir(staticDir)))
+	if info, err := os.Stat(staticDir); err == nil && info.IsDir() {
+		r.Handle("/*", http.FileServer(http.Dir(staticDir)))
+	} else {
+		log.Warn().Str("path", staticDir).Msg("static directory not found; skipping catch-all static route")
+	}
 	return r
 }
 
@@ -183,7 +187,10 @@ func apiLogMiddleware() func(http.Handler) http.Handler {
 	)
 }
 
-func bodyCaptureMiddleware() func(http.Handler) http.Handler {
+func bodyCaptureMiddleware(maxCaptureBytes int) func(http.Handler) http.Handler {
+	if maxCaptureBytes <= 0 {
+		maxCaptureBytes = 4096
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if isSSERequest(r) {
@@ -196,26 +203,48 @@ func bodyCaptureMiddleware() func(http.Handler) http.Handler {
 			}
 			r.Body = io.NopCloser(bytes.NewReader(reqBody))
 
-			cw := &captureWriter{ResponseWriter: w}
+			cw := &captureWriter{ResponseWriter: w, maxBytes: maxCaptureBytes}
 			next.ServeHTTP(cw, r)
 
-			if len(reqBody) > 0 {
-				httplog.SetAttrs(r.Context(), slog.Any("request_body", parseMaybeJSON(reqBody)))
+			reqLog := reqBody
+			if len(reqLog) > maxCaptureBytes {
+				reqLog = reqLog[:maxCaptureBytes]
+			}
+			if len(reqLog) > 0 {
+				httplog.SetAttrs(r.Context(), slog.Any("request_body", parseMaybeJSON(reqLog)))
 			} else {
 				httplog.SetAttrs(r.Context(), slog.Any("request_body", ""))
 			}
-			httplog.SetAttrs(r.Context(), slog.Any("response_body", parseMaybeJSON(cw.body.Bytes())))
+
+			respLog := cw.body.Bytes()
+			httplog.SetAttrs(r.Context(), slog.Any("response_body", parseMaybeJSON(respLog)))
+			httplog.SetAttrs(r.Context(), slog.Bool("request_body_truncated", len(reqBody) > maxCaptureBytes))
+			httplog.SetAttrs(r.Context(), slog.Bool("response_body_truncated", cw.truncated))
 		})
 	}
 }
 
 type captureWriter struct {
 	http.ResponseWriter
-	body bytes.Buffer
+	body      bytes.Buffer
+	maxBytes  int
+	truncated bool
 }
 
 func (c *captureWriter) Write(p []byte) (int, error) {
-	_, _ = c.body.Write(p)
+	if !c.truncated {
+		remain := c.maxBytes - c.body.Len()
+		if remain > 0 {
+			if len(p) <= remain {
+				_, _ = c.body.Write(p)
+			} else {
+				_, _ = c.body.Write(p[:remain])
+				c.truncated = true
+			}
+		} else {
+			c.truncated = true
+		}
+	}
 	return c.ResponseWriter.Write(p)
 }
 
@@ -282,23 +311,6 @@ func logRoutes(r chi.Router) {
 		b.WriteString(fmt.Sprintf("  %-6s %s\n", rt.Method, rt.Path))
 	}
 	fmt.Print(b.String())
-}
-
-func seedAgent(st *store.Store, name, key string, initial int64) {
-	if name == "" || key == "" {
-		return
-	}
-	ctx := context.Background()
-	agent, err := st.GetAgentByAPIKey(ctx, key)
-	if err == nil && agent != nil {
-		return
-	}
-	id, err := st.CreateAgent(ctx, name, key, "claim_"+key)
-	if err != nil {
-		log.Error().Err(err).Msg("seed agent error")
-		return
-	}
-	_ = st.EnsureAccount(ctx, id, initial)
 }
 
 func defaultProviderRates(cfg config.ServerConfig) []store.ProviderRate {

@@ -42,7 +42,7 @@ This document is the detailed guide for engineers and autonomous agents working 
 ## Table Lifecycle and Disconnect Policy
 - Table runtime states are `active -> closing -> closed`.
 - `closing` is entered when any seated session is explicitly closed, expires, or the current actor times out.
-- While `closing`, the server freezes normal progression and starts a reconnect grace window (current default in code: 15s).
+- While `closing`, the server freezes normal progression and starts a reconnect grace window (current default in code: 30s).
 - If the disconnected side reconnects in grace window, table returns to `active` and continues the same hand.
 - If grace expires, server settles the current hand by forfeit for the disconnected side, emits `table_closed`, and closes both sessions.
 - Old closed tables are not reused for new opponents; agents should re-join matchmaking.
@@ -129,7 +129,7 @@ Common:
 - `POSTGRES_DSN`
 - `HTTP_ADDR` (default `:8080`)
 - `ADMIN_API_KEY`
-- `LOG_LEVEL`, `LOG_PRETTY`, `LOG_SAMPLE_EVERY`, `LOG_FILE`, `LOG_MAX_MB`
+- `LOG_LEVEL`, `LOG_FILE`, `LOG_MAX_MB`
 
 Guardrails:
 - `MAX_BUDGET_USD` (default `20`)

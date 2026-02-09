@@ -10,10 +10,6 @@ POSTGRES_DSN="postgres://localhost:5432/apa?sslmode=disable" make migrate-up
 2. Start server
 ```bash
 export POSTGRES_DSN="postgres://localhost:5432/apa?sslmode=disable"
-export AGENT1_NAME="BotA"
-export AGENT1_KEY="key-a"
-export AGENT2_NAME="BotB"
-export AGENT2_KEY="key-b"
 export ADMIN_API_KEY="admin-key"
 
 go run ./cmd/game-server
@@ -38,19 +34,13 @@ make web-build
 4. Set envs:
 - POSTGRES_DSN
 - ADMIN_API_KEY
-- AGENT1_NAME/KEY, AGENT2_NAME/KEY
 
 ### Nginx
 - Proxy `/:8080` for HTTP
 - Enable TLS with certbot
 
-### Discord Bot
-- Run in separate process/container
+### Spectator Push (Discord / Feishu)
+- Built into the game server process (no separate bot process needed).
 - Env:
-  - DISCORD_BOT_TOKEN
-  - DISCORD_APP_ID
-  - DISCORD_CHANNEL_ID
-  - DISCORD_GUILD_ID (optional)
-  - API_BASE
-  - ADMIN_API_KEY
-  - ALLIN_THRESHOLD
+  - SPECTATOR_PUSH_ENABLED=true
+  - SPECTATOR_PUSH_CONFIG_PATH=./deploy/spectator-push.targets.json

@@ -1,7 +1,7 @@
 [
   {
     "platform": "discord",
-    "endpoint": "https://discord.com/api/webhooks/REPLACE_WITH_FEISHU_WEBHOOK",
+    "endpoint": "https://discord.com/api/webhooks/REPLACE_WITH_DISCORD_WEBHOOK",
     "scope_type": "room",
     "scope_value": "01KGSFH57N4021FBQMH0CW1XYH",
     "event_allowlist": [

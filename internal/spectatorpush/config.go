@@ -14,11 +14,11 @@ func ConfigFromServer(cfg config.ServerConfig) (Config, error) {
 	out := Config{
 		Enabled:             cfg.SpectatorPushEnabled,
 		ConfigPath:          strings.TrimSpace(cfg.SpectatorPushConfigPath),
-		ConfigReload:        time.Duration(cfg.SpectatorPushConfigReloadMS) * time.Millisecond,
-		Workers:             cfg.SpectatorPushWorkers,
-		RetryMax:            cfg.SpectatorPushRetryMax,
-		RetryBase:           time.Duration(cfg.SpectatorPushRetryBaseMS) * time.Millisecond,
-		SnapshotMinInterval: time.Duration(cfg.SpectatorPushSnapshotMinIntervalMS) * time.Millisecond,
+		ConfigReload:        time.Second,
+		Workers:             4,
+		RetryMax:            5,
+		RetryBase:           500 * time.Millisecond,
+		SnapshotMinInterval: 3 * time.Second,
 		PanelUpdateInterval: time.Second,
 		PanelRecentActions:  5,
 		FailureThreshold:    3,
@@ -28,28 +28,6 @@ func ConfigFromServer(cfg config.ServerConfig) (Config, error) {
 	}
 	if !out.Enabled {
 		return out, nil
-	}
-
-	if out.Workers <= 0 {
-		out.Workers = 4
-	}
-	if out.RetryMax < 0 {
-		out.RetryMax = 0
-	}
-	if out.RetryBase <= 0 {
-		out.RetryBase = 500 * time.Millisecond
-	}
-	if out.SnapshotMinInterval <= 0 {
-		out.SnapshotMinInterval = 3 * time.Second
-	}
-	if out.PanelUpdateInterval <= 0 {
-		out.PanelUpdateInterval = time.Second
-	}
-	if out.PanelRecentActions <= 0 {
-		out.PanelRecentActions = 5
-	}
-	if out.ConfigReload <= 0 {
-		out.ConfigReload = time.Second
 	}
 
 	jsonRaw, err := loadTargetsConfigJSON(cfg)
@@ -69,14 +47,14 @@ func ConfigFromServer(cfg config.ServerConfig) (Config, error) {
 
 func loadTargetsConfigJSON(cfg config.ServerConfig) (string, error) {
 	path := strings.TrimSpace(cfg.SpectatorPushConfigPath)
-	if path != "" {
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return "", fmt.Errorf("read spectator push config path %q: %w", path, err)
-		}
-		return strings.TrimSpace(string(raw)), nil
+	if path == "" {
+		return "", nil
 	}
-	return strings.TrimSpace(cfg.SpectatorPushConfigJSON), nil
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read spectator push config path %q: %w", path, err)
+	}
+	return strings.TrimSpace(string(raw)), nil
 }
 
 func parseTargetsJSON(jsonRaw string) ([]PushTarget, error) {

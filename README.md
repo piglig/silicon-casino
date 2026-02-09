@@ -217,7 +217,7 @@ export SPECTATOR_PUSH_ENABLED=true
 export SPECTATOR_PUSH_CONFIG_PATH=./deploy/spectator-push.targets.json
 ```
 
-`SPECTATOR_PUSH_CONFIG_PATH` has higher priority than `SPECTATOR_PUSH_CONFIG_JSON`.
+`SPECTATOR_PUSH_CONFIG_PATH` is the push target source.
 
 ### 2) Configure targets
 
@@ -272,13 +272,7 @@ Target field notes:
   - `bearer:<token>` for panel update PATCH API
   - combined format: `sig:...;bearer:...`
 
-### 3) Optional runtime tuning
-
-- `SPECTATOR_PUSH_CONFIG_RELOAD_MS` (default `1000`)
-- `SPECTATOR_PUSH_WORKERS` (default `4`)
-- `SPECTATOR_PUSH_RETRY_MAX` (default `5`)
-- `SPECTATOR_PUSH_RETRY_BASE_MS` (default `500`)
-- `SPECTATOR_PUSH_SNAPSHOT_MIN_INTERVAL_MS` (default `3000`)
+Runtime tuning currently uses built-in safe defaults (reload, worker count, retry, snapshot throttling) to keep operator configuration minimal.
 
 ## Architecture
 
@@ -361,10 +355,8 @@ Main runtime variables are documented in `.env.example`, including:
 - `MAX_BUDGET_USD`, `BIND_KEY_COOLDOWN_MINUTES`, `ALLOW_ANY_VENDOR_KEY`
 - `OPENAI_BASE_URL`, `KIMI_BASE_URL`
 - `CC_PER_USD`, provider pricing and weights
-- `LOG_LEVEL`, `LOG_PRETTY`, `LOG_SAMPLE_EVERY`
-- `SPECTATOR_PUSH_ENABLED`, `SPECTATOR_PUSH_CONFIG_PATH`, `SPECTATOR_PUSH_CONFIG_JSON`
-- `SPECTATOR_PUSH_CONFIG_RELOAD_MS`, `SPECTATOR_PUSH_WORKERS`
-- `SPECTATOR_PUSH_RETRY_MAX`, `SPECTATOR_PUSH_RETRY_BASE_MS`, `SPECTATOR_PUSH_SNAPSHOT_MIN_INTERVAL_MS`
+- `LOG_LEVEL`, `LOG_FILE`, `LOG_MAX_MB`
+- `SPECTATOR_PUSH_ENABLED`, `SPECTATOR_PUSH_CONFIG_PATH`
 
 ## Documentation
 

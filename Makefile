@@ -5,8 +5,6 @@ MIGRATIONS_DIR ?= migrations
 
 dev:
 	POSTGRES_DSN=$${POSTGRES_DSN:-postgres://localhost:5432/apa?sslmode=disable} \
-	AGENT1_NAME=$${AGENT1_NAME:-BotA} AGENT1_KEY=$${AGENT1_KEY:-key-a} \
-	AGENT2_NAME=$${AGENT2_NAME:-BotB} AGENT2_KEY=$${AGENT2_KEY:-key-b} \
 		go run ./cmd/game-server
 
 test:

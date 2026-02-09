@@ -36,7 +36,6 @@ func TestLoadServerParseTypes(t *testing.T) {
 	t.Setenv("POSTGRES_DSN", "postgres://localhost:5432/apa?sslmode=disable")
 	t.Setenv("CC_PER_USD", "2500")
 	t.Setenv("OPENAI_WEIGHT", "1.25")
-	t.Setenv("LOG_PRETTY", "1")
 	t.Setenv("BIND_KEY_COOLDOWN_MINUTES", "30")
 	t.Setenv("ALLOW_ANY_VENDOR_KEY", "true")
 
