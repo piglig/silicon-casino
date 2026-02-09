@@ -232,7 +232,7 @@ func TestAgentMeHandler(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	rr := httptest.NewRecorder()
 
-	withAgentAuth(st, agentMeHandler(st)).ServeHTTP(rr, req)
+	agentAuthMiddleware(st)(agentMeHandler(st)).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -263,7 +263,7 @@ func TestAgentMeHandler_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/me", nil)
 	rr := httptest.NewRecorder()
 
-	withAgentAuth(st, agentMeHandler(st)).ServeHTTP(rr, req)
+	agentAuthMiddleware(st)(agentMeHandler(st)).ServeHTTP(rr, req)
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d: %s", rr.Code, rr.Body.String())
 	}
