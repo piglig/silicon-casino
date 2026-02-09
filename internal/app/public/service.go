@@ -1,0 +1,259 @@
+package public
+
+import (
+	"context"
+	"encoding/json"
+
+	"silicon-casino/internal/store"
+)
+
+type Service struct {
+	store *store.Store
+}
+
+func NewService(st *store.Store) *Service {
+	return &Service{store: st}
+}
+
+func (s *Service) Rooms(ctx context.Context) (*RoomsResponse, error) {
+	items, err := s.store.ListRooms(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]RoomItem, 0, len(items))
+	for _, it := range items {
+		out = append(out, RoomItem{
+			ID:           it.ID,
+			Name:         it.Name,
+			MinBuyinCC:   it.MinBuyinCC,
+			SmallBlindCC: it.SmallBlindCC,
+			BigBlindCC:   it.BigBlindCC,
+		})
+	}
+	return &RoomsResponse{Items: out}, nil
+}
+
+func (s *Service) Tables(ctx context.Context, roomID string, limit, offset int) (*TablesResponse, error) {
+	items, err := s.store.ListTables(ctx, roomID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TableItem, 0, len(items))
+	for _, it := range items {
+		out = append(out, TableItem{
+			TableID:      it.ID,
+			RoomID:       it.RoomID,
+			Status:       it.Status,
+			CreatedAt:    it.CreatedAt,
+			SmallBlindCC: it.SmallBlindCC,
+			BigBlindCC:   it.BigBlindCC,
+		})
+	}
+	return &TablesResponse{Items: out, Limit: limit, Offset: offset}, nil
+}
+
+func (s *Service) TableHistory(ctx context.Context, roomID, agentID string, limit, offset int) (*TableHistoryResponse, error) {
+	items, err := s.store.ListTableHistory(ctx, roomID, agentID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TableHistoryItem, 0, len(items))
+	for _, it := range items {
+		out = append(out, TableHistoryItem{
+			TableID:       it.TableID,
+			RoomID:        it.RoomID,
+			Status:        it.Status,
+			SmallBlindCC:  it.SmallBlindCC,
+			BigBlindCC:    it.BigBlindCC,
+			CreatedAt:     it.CreatedAt,
+			LastHandEnded: it.LastHandEnded,
+		})
+	}
+	return &TableHistoryResponse{Items: out, Limit: limit, Offset: offset}, nil
+}
+
+func (s *Service) AgentTables(ctx context.Context, agentID string, limit, offset int) (*TableHistoryResponse, error) {
+	if agentID == "" {
+		return nil, ErrInvalidRequest
+	}
+	items, err := s.store.ListAgentTables(ctx, agentID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TableHistoryItem, 0, len(items))
+	for _, it := range items {
+		out = append(out, TableHistoryItem{
+			TableID:       it.TableID,
+			RoomID:        it.RoomID,
+			Status:        it.Status,
+			SmallBlindCC:  it.SmallBlindCC,
+			BigBlindCC:    it.BigBlindCC,
+			CreatedAt:     it.CreatedAt,
+			LastHandEnded: it.LastHandEnded,
+		})
+	}
+	return &TableHistoryResponse{Items: out, Limit: limit, Offset: offset}, nil
+}
+
+func (s *Service) TableReplay(ctx context.Context, tableID string, fromSeq int64, limit int) (*ReplayResponse, error) {
+	if tableID == "" {
+		return nil, ErrInvalidRequest
+	}
+	lastSeq, err := s.store.GetTableReplayLastSeq(ctx, tableID)
+	if err != nil {
+		return nil, err
+	}
+	if lastSeq == 0 {
+		return nil, ErrTableNotFound
+	}
+	items, err := s.store.ListTableReplayEventsFromSeq(ctx, tableID, fromSeq, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ReplayEvent, 0, len(items))
+	for _, it := range items {
+		var payload any
+		if len(it.Payload) > 0 {
+			_ = json.Unmarshal(it.Payload, &payload)
+		}
+		out = append(out, ReplayEvent{
+			ID:           it.ID,
+			TableID:      it.TableID,
+			HandID:       it.HandID,
+			GlobalSeq:    it.GlobalSeq,
+			HandSeq:      it.HandSeq,
+			EventType:    it.EventType,
+			ActorAgentID: it.ActorAgentID,
+			Payload:      payload,
+			SchemaVer:    it.SchemaVer,
+			CreatedAt:    it.CreatedAt,
+		})
+	}
+	nextFrom := fromSeq + int64(len(out))
+	return &ReplayResponse{
+		Items:       out,
+		NextFromSeq: nextFrom,
+		HasMore:     nextFrom <= lastSeq,
+		LastSeq:     lastSeq,
+	}, nil
+}
+
+func (s *Service) TableTimeline(ctx context.Context, tableID string) (*TimelineResponse, error) {
+	if tableID == "" {
+		return nil, ErrInvalidRequest
+	}
+	hands, err := s.store.ListHandsByTableID(ctx, tableID)
+	if err != nil {
+		return nil, err
+	}
+	lastSeq, err := s.store.GetTableReplayLastSeq(ctx, tableID)
+	if err != nil {
+		return nil, err
+	}
+	if lastSeq == 0 {
+		return nil, ErrTableNotFound
+	}
+	events, err := s.store.ListTableReplayEventsFromSeq(ctx, tableID, 1, int(lastSeq))
+	if err != nil {
+		return nil, err
+	}
+	byHandSeqRange := make(map[string]map[string]int64)
+	for _, ev := range events {
+		if ev.HandID == "" {
+			continue
+		}
+		rng := byHandSeqRange[ev.HandID]
+		if rng == nil {
+			rng = map[string]int64{"start": ev.GlobalSeq, "end": ev.GlobalSeq}
+			byHandSeqRange[ev.HandID] = rng
+		}
+		if ev.GlobalSeq < rng["start"] {
+			rng["start"] = ev.GlobalSeq
+		}
+		if ev.GlobalSeq > rng["end"] {
+			rng["end"] = ev.GlobalSeq
+		}
+	}
+	out := make([]TimelineItem, 0, len(hands))
+	for _, h := range hands {
+		rng := byHandSeqRange[h.ID]
+		startSeq := int64(0)
+		endSeq := int64(0)
+		if rng != nil {
+			startSeq = rng["start"]
+			endSeq = rng["end"]
+		}
+		out = append(out, TimelineItem{
+			HandID:        h.ID,
+			StartSeq:      startSeq,
+			EndSeq:        endSeq,
+			WinnerAgentID: h.WinnerAgentID,
+			PotCC:         h.PotCC,
+			StreetEnd:     h.StreetEnd,
+			StartedAt:     h.StartedAt,
+			EndedAt:       h.EndedAt,
+		})
+	}
+	return &TimelineResponse{TableID: tableID, Items: out}, nil
+}
+
+func (s *Service) TableSnapshot(ctx context.Context, tableID string, atSeq int64) (*SnapshotResponse, error) {
+	if tableID == "" || atSeq < 1 {
+		return nil, ErrInvalidRequest
+	}
+	lastSeq, err := s.store.GetTableReplayLastSeq(ctx, tableID)
+	if err != nil {
+		return nil, err
+	}
+	if lastSeq == 0 {
+		return nil, ErrTableNotFound
+	}
+	if atSeq > lastSeq {
+		atSeq = lastSeq
+	}
+	snap, err := s.store.GetLatestTableReplaySnapshotAtOrBefore(ctx, tableID, atSeq)
+	snapshotSeq := int64(0)
+	replayState := map[string]any{}
+	hit := false
+	if err == nil && snap != nil {
+		hit = true
+		snapshotSeq = snap.AtGlobalSeq
+		_ = json.Unmarshal(snap.StateBlob, &replayState)
+	}
+	fromSeq := snapshotSeq + 1
+	limit := int(atSeq - snapshotSeq + 1)
+	if limit < 1 {
+		limit = 1
+	}
+	events, err := s.store.ListTableReplayEventsFromSeq(ctx, tableID, fromSeq, limit)
+	if err != nil {
+		return nil, err
+	}
+	for _, ev := range events {
+		if ev.GlobalSeq > atSeq {
+			break
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			continue
+		}
+		if ev.EventType == "state_snapshot" {
+			replayState = payload
+		}
+		replayState["last_event_type"] = ev.EventType
+		replayState["global_seq"] = ev.GlobalSeq
+	}
+	return &SnapshotResponse{TableID: tableID, AtSeq: atSeq, State: replayState, Hit: hit}, nil
+}
+
+func (s *Service) Leaderboard(ctx context.Context, limit, offset int) (*LeaderboardResponse, error) {
+	items, err := s.store.ListLeaderboard(ctx, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]LeaderboardItem, 0, len(items))
+	for _, it := range items {
+		out = append(out, LeaderboardItem{AgentID: it.AgentID, Name: it.Name, NetCC: it.NetCC})
+	}
+	return &LeaderboardResponse{Items: out, Limit: limit, Offset: offset}, nil
+}

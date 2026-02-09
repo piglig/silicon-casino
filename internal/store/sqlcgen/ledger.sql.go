@@ -80,31 +80,31 @@ func (q *Queries) ListLeaderboard(ctx context.Context, arg ListLeaderboardParams
 const listLedgerEntries = `-- name: ListLedgerEntries :many
 SELECT id, agent_id, type, amount_cc, ref_type, ref_id, created_at
 FROM ledger_entries
-WHERE ($1::text = '' OR agent_id = $1)
-  AND ($2::text = '' OR (ref_type = 'hand' AND ref_id = $2))
-  AND ($3::timestamptz IS NULL OR created_at >= $3)
-  AND ($4::timestamptz IS NULL OR created_at <= $4)
+WHERE ($1::text = '' OR agent_id = $1::text)
+  AND ($2::text = '' OR (ref_type = 'hand' AND ref_id = $2::text))
+  AND ($3::timestamptz IS NULL OR created_at >= $3::timestamptz)
+  AND ($4::timestamptz IS NULL OR created_at <= $4::timestamptz)
 ORDER BY created_at DESC
-LIMIT $5 OFFSET $6
+LIMIT $6 OFFSET $5
 `
 
 type ListLedgerEntriesParams struct {
-	Column1 string
-	Column2 string
-	Column3 pgtype.Timestamptz
-	Column4 pgtype.Timestamptz
-	Limit   int32
-	Offset  int32
+	AgentID    string
+	HandID     string
+	FromTs     pgtype.Timestamptz
+	ToTs       pgtype.Timestamptz
+	OffsetRows int32
+	LimitRows  int32
 }
 
 func (q *Queries) ListLedgerEntries(ctx context.Context, arg ListLedgerEntriesParams) ([]LedgerEntry, error) {
 	rows, err := q.db.Query(ctx, listLedgerEntries,
-		arg.Column1,
-		arg.Column2,
-		arg.Column3,
-		arg.Column4,
-		arg.Limit,
-		arg.Offset,
+		arg.AgentID,
+		arg.HandID,
+		arg.FromTs,
+		arg.ToTs,
+		arg.OffsetRows,
+		arg.LimitRows,
 	)
 	if err != nil {
 		return nil, err

@@ -1,28 +1,27 @@
 package platforms
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestDiscordAdapterPayload(t *testing.T) {
 	var got map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestHTTPClient(func(r *http.Request) (*http.Response, error) {
 		defer r.Body.Close()
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
 			t.Fatalf("decode body: %v", err)
 		}
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer srv.Close()
+		return &http.Response{StatusCode: http.StatusNoContent, Body: io.NopCloser(bytes.NewReader(nil)), Header: make(http.Header)}, nil
+	})
 
-	adapter := NewDiscordAdapter(NewHTTPClient(time.Second))
-	err := adapter.Send(context.Background(), srv.URL, "", Message{
+	adapter := NewDiscordAdapter(client)
+	err := adapter.Send(context.Background(), "https://discord.example/webhook", "", Message{
 		Title:       "t",
 		Content:     "alert",
 		Description: "desc",
@@ -74,20 +73,21 @@ func TestDiscordAdapterPayload(t *testing.T) {
 func TestDiscordAdapterPanelUpsertUsesPatch(t *testing.T) {
 	var methods []string
 	var paths []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestHTTPClient(func(r *http.Request) (*http.Response, error) {
 		methods = append(methods, r.Method)
 		paths = append(paths, r.URL.Path+"?"+r.URL.RawQuery)
 		if r.Method == http.MethodPost {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"id":"m123"}`))
-			return
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"id":"m123"}`)),
+				Header:     make(http.Header),
+			}, nil
 		}
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer srv.Close()
+		return &http.Response{StatusCode: http.StatusNoContent, Body: io.NopCloser(bytes.NewReader(nil)), Header: make(http.Header)}, nil
+	})
 
-	endpoint := srv.URL + "/api/webhooks/wid/wtoken"
-	adapter := NewDiscordAdapter(NewHTTPClient(time.Second))
+	endpoint := "https://discord.example/api/webhooks/wid/wtoken"
+	adapter := NewDiscordAdapter(client)
 	msg := Message{
 		PanelKey:    "room|table",
 		Title:       "t",
@@ -118,19 +118,20 @@ func TestDiscordAdapterPanelUpsertUsesPatch(t *testing.T) {
 
 func TestDiscordAdapterForgetPanelForcesRecreate(t *testing.T) {
 	var methods []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestHTTPClient(func(r *http.Request) (*http.Response, error) {
 		methods = append(methods, r.Method)
 		if r.Method == http.MethodPost {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"id":"m123"}`))
-			return
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"id":"m123"}`)),
+				Header:     make(http.Header),
+			}, nil
 		}
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer srv.Close()
+		return &http.Response{StatusCode: http.StatusNoContent, Body: io.NopCloser(bytes.NewReader(nil)), Header: make(http.Header)}, nil
+	})
 
-	endpoint := srv.URL + "/api/webhooks/wid/wtoken"
-	adapter := NewDiscordAdapter(NewHTTPClient(time.Second))
+	endpoint := "https://discord.example/api/webhooks/wid/wtoken"
+	adapter := NewDiscordAdapter(client)
 	msg := Message{PanelKey: "room|table", Title: "t", Content: "c", Description: "d"}
 
 	if err := adapter.Send(context.Background(), endpoint, "", msg); err != nil {

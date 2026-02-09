@@ -1,30 +1,29 @@
 package platforms
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestFeishuAdapterPayloadAndHeader(t *testing.T) {
 	var got map[string]any
 	var headerSig string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestHTTPClient(func(r *http.Request) (*http.Response, error) {
 		headerSig = r.Header.Get("X-Lark-Signature")
 		defer r.Body.Close()
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
 			t.Fatalf("decode body: %v", err)
 		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(nil)), Header: make(http.Header)}, nil
+	})
 
-	adapter := NewFeishuAdapter(NewHTTPClient(time.Second))
-	err := adapter.Send(context.Background(), srv.URL, "sig-1", Message{
+	adapter := NewFeishuAdapter(client)
+	err := adapter.Send(context.Background(), "https://feishu.example/hook", "sig-1", Message{
 		Title:       "t",
 		Description: "summary",
 		Fields:      []Field{{Name: "status", Value: "active", Inline: true}},
@@ -44,23 +43,24 @@ func TestFeishuAdapterPanelUpsertUsesPatch(t *testing.T) {
 	var methods []string
 	var paths []string
 	var authHeader string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestHTTPClient(func(r *http.Request) (*http.Response, error) {
 		methods = append(methods, r.Method)
 		paths = append(paths, r.URL.Path)
 		if r.Method == http.MethodPatch {
 			authHeader = r.Header.Get("Authorization")
 		}
 		if r.Method == http.MethodPost {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"data":{"message_id":"f001"}}`))
-			return
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"data":{"message_id":"f001"}}`)),
+				Header:     make(http.Header),
+			}, nil
 		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(nil)), Header: make(http.Header)}, nil
+	})
 
-	endpoint := srv.URL + "/open-apis/bot/v2/hook/abc"
-	adapter := NewFeishuAdapter(NewHTTPClient(time.Second))
+	endpoint := "https://open.feishu.cn/open-apis/bot/v2/hook/abc"
+	adapter := NewFeishuAdapter(client)
 	msg := Message{
 		PanelKey:    "room|table",
 		Title:       "t",

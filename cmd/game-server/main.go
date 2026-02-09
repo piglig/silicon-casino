@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"expvar"
 	"net/http"
 	"time"
 
@@ -14,16 +13,6 @@ import (
 	"silicon-casino/internal/store"
 
 	"github.com/rs/zerolog/log"
-)
-
-var (
-	replayQueryTotal        = expvar.NewInt("replay_query_total")
-	replayQueryErrorsTotal  = expvar.NewInt("replay_query_errors_total")
-	replayQueryP95MS        = expvar.NewInt("replay_query_p95_ms")
-	replaySnapshotRebuildMS = expvar.NewInt("replay_snapshot_rebuild_ms")
-	replaySnapshotHitTotal  = expvar.NewInt("replay_snapshot_hit_total")
-	replaySnapshotMissTotal = expvar.NewInt("replay_snapshot_miss_total")
-	replaySnapshotHitRatio  = expvar.NewFloat("replay_snapshot_hit_ratio")
 )
 
 func main() {

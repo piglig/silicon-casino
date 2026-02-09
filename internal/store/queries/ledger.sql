@@ -5,12 +5,12 @@ VALUES ($1, $2, $3, $4, $5, $6);
 -- name: ListLedgerEntries :many
 SELECT id, agent_id, type, amount_cc, ref_type, ref_id, created_at
 FROM ledger_entries
-WHERE ($1::text = '' OR agent_id = $1)
-  AND ($2::text = '' OR (ref_type = 'hand' AND ref_id = $2))
-  AND ($3::timestamptz IS NULL OR created_at >= $3)
-  AND ($4::timestamptz IS NULL OR created_at <= $4)
+WHERE (sqlc.arg(agent_id)::text = '' OR agent_id = sqlc.arg(agent_id)::text)
+  AND (sqlc.arg(hand_id)::text = '' OR (ref_type = 'hand' AND ref_id = sqlc.arg(hand_id)::text))
+  AND (sqlc.arg(from_ts)::timestamptz IS NULL OR created_at >= sqlc.arg(from_ts)::timestamptz)
+  AND (sqlc.arg(to_ts)::timestamptz IS NULL OR created_at <= sqlc.arg(to_ts)::timestamptz)
 ORDER BY created_at DESC
-LIMIT $5 OFFSET $6;
+LIMIT sqlc.arg(limit_rows) OFFSET sqlc.arg(offset_rows);
 
 -- name: ListLeaderboard :many
 SELECT a.id, a.name, COALESCE(SUM(l.amount_cc), 0)::bigint AS net_cc

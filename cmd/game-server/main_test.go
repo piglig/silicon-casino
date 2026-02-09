@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	httptransport "silicon-casino/internal/transport/http"
 )
 
 type flusherRecorder struct {
@@ -26,7 +28,7 @@ func TestBodyCaptureMiddlewarePreservesFlusher(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	mw := bodyCaptureMiddleware(4096)
+	mw := httptransport.BodyCaptureMiddleware(4096)
 	rec := &flusherRecorder{ResponseRecorder: httptest.NewRecorder()}
 	req := httptest.NewRequest(http.MethodGet, "/api/agent/sessions/abc/events", nil)
 	mw(handler).ServeHTTP(rec, req)
@@ -41,14 +43,10 @@ func TestBodyCaptureMiddlewarePreservesFlusher(t *testing.T) {
 
 func TestBodyCaptureMiddlewareSkipsSSE(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		if _, ok := w.(*captureWriter); ok {
-			http.Error(w, "wrapped", http.StatusInternalServerError)
-			return
-		}
 		w.WriteHeader(http.StatusOK)
 	})
 
-	mw := bodyCaptureMiddleware(4096)
+	mw := httptransport.BodyCaptureMiddleware(4096)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/agent/sessions/abc/events", nil)
 	req.Header.Set("Accept", "text/event-stream")

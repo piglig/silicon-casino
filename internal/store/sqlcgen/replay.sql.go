@@ -77,18 +77,28 @@ const insertTableReplayEvent = `-- name: InsertTableReplayEvent :exec
 INSERT INTO table_replay_events (
   id, table_id, hand_id, global_seq, hand_seq, event_type, actor_agent_id, payload, schema_version
 )
-VALUES ($1, $2, NULLIF($3::text, ''), $4, $5, $6, NULLIF($7::text, ''), $8::jsonb, $9)
+VALUES (
+  $1,
+  $2,
+  NULLIF($3::text, ''),
+  $4,
+  $5,
+  $6,
+  NULLIF($7::text, ''),
+  $8::jsonb,
+  $9
+)
 `
 
 type InsertTableReplayEventParams struct {
 	ID            string
 	TableID       string
-	Column3       string
+	HandID        string
 	GlobalSeq     int64
 	HandSeq       pgtype.Int4
 	EventType     string
-	Column7       string
-	Column8       []byte
+	ActorAgentID  string
+	Payload       []byte
 	SchemaVersion int32
 }
 
@@ -96,12 +106,12 @@ func (q *Queries) InsertTableReplayEvent(ctx context.Context, arg InsertTableRep
 	_, err := q.db.Exec(ctx, insertTableReplayEvent,
 		arg.ID,
 		arg.TableID,
-		arg.Column3,
+		arg.HandID,
 		arg.GlobalSeq,
 		arg.HandSeq,
 		arg.EventType,
-		arg.Column7,
-		arg.Column8,
+		arg.ActorAgentID,
+		arg.Payload,
 		arg.SchemaVersion,
 	)
 	return err
@@ -109,14 +119,20 @@ func (q *Queries) InsertTableReplayEvent(ctx context.Context, arg InsertTableRep
 
 const insertTableReplaySnapshot = `-- name: InsertTableReplaySnapshot :exec
 INSERT INTO table_replay_snapshots (id, table_id, at_global_seq, state_blob, schema_version)
-VALUES ($1, $2, $3, $4::jsonb, $5)
+VALUES (
+  $1,
+  $2,
+  $3,
+  $4::jsonb,
+  $5
+)
 `
 
 type InsertTableReplaySnapshotParams struct {
 	ID            string
 	TableID       string
 	AtGlobalSeq   int64
-	Column4       []byte
+	StateBlob     []byte
 	SchemaVersion int32
 }
 
@@ -125,7 +141,7 @@ func (q *Queries) InsertTableReplaySnapshot(ctx context.Context, arg InsertTable
 		arg.ID,
 		arg.TableID,
 		arg.AtGlobalSeq,
-		arg.Column4,
+		arg.StateBlob,
 		arg.SchemaVersion,
 	)
 	return err
@@ -283,25 +299,25 @@ SELECT
   MAX(h.ended_at) AS last_hand_ended_at
 FROM tables t
 LEFT JOIN hands h ON h.table_id = t.id
-WHERE ($1::text = '' OR t.room_id = $1)
+WHERE ($1::text = '' OR t.room_id = $1::text)
   AND (
     $2::text = ''
     OR EXISTS (
       SELECT 1
       FROM agent_sessions s
-      WHERE s.table_id = t.id AND s.agent_id = $2
+      WHERE s.table_id = t.id AND s.agent_id = $2::text
     )
   )
 GROUP BY t.id, t.room_id, t.status, t.small_blind_cc, t.big_blind_cc, t.created_at
 ORDER BY MAX(h.started_at) DESC NULLS LAST, t.created_at DESC
-LIMIT $3 OFFSET $4
+LIMIT $4 OFFSET $3
 `
 
 type ListTableHistoryParams struct {
-	Column1 string
-	Column2 string
-	Limit   int32
-	Offset  int32
+	RoomID     string
+	AgentID    string
+	OffsetRows int32
+	LimitRows  int32
 }
 
 type ListTableHistoryRow struct {
@@ -316,10 +332,10 @@ type ListTableHistoryRow struct {
 
 func (q *Queries) ListTableHistory(ctx context.Context, arg ListTableHistoryParams) ([]ListTableHistoryRow, error) {
 	rows, err := q.db.Query(ctx, listTableHistory,
-		arg.Column1,
-		arg.Column2,
-		arg.Limit,
-		arg.Offset,
+		arg.RoomID,
+		arg.AgentID,
+		arg.OffsetRows,
+		arg.LimitRows,
 	)
 	if err != nil {
 		return nil, err

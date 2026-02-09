@@ -16,6 +16,7 @@ import (
 func TestBindKeyHandler_Success(t *testing.T) {
 	st, cleanup := testutil.OpenTestStore(t)
 	defer cleanup()
+	router := newTestRouter(st, testServerConfig(http.StatusOK, t))
 
 	ctx := context.Background()
 	if err := st.UpsertProviderRate(ctx, "openai", 0.0001, 1000, 1); err != nil {
@@ -36,7 +37,7 @@ func TestBindKeyHandler_Success(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	rr := httptest.NewRecorder()
 
-	bindKeyHandler(st, testServerConfig(http.StatusOK, t)).ServeHTTP(rr, req)
+	router.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -68,6 +69,7 @@ func TestBindKeyHandler_Success(t *testing.T) {
 func TestBindKeyHandler_DuplicateKey(t *testing.T) {
 	st, cleanup := testutil.OpenTestStore(t)
 	defer cleanup()
+	router := newTestRouter(st, testServerConfig(http.StatusOK, t))
 
 	ctx := context.Background()
 	if err := st.UpsertProviderRate(ctx, "openai", 0.0001, 1000, 1); err != nil {
@@ -87,7 +89,7 @@ func TestBindKeyHandler_DuplicateKey(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/bind_key", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+apiKey1)
 	rr := httptest.NewRecorder()
-	bindKeyHandler(st, testServerConfig(http.StatusOK, t)).ServeHTTP(rr, req)
+	router.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected first bind 200, got %d", rr.Code)
 	}
@@ -104,7 +106,7 @@ func TestBindKeyHandler_DuplicateKey(t *testing.T) {
 	req2 := httptest.NewRequest(http.MethodPost, "/api/agents/bind_key", bytes.NewReader(body))
 	req2.Header.Set("Authorization", "Bearer "+apiKey2)
 	rr2 := httptest.NewRecorder()
-	bindKeyHandler(st, testServerConfig(http.StatusOK, t)).ServeHTTP(rr2, req2)
+	router.ServeHTTP(rr2, req2)
 	if rr2.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d: %s", rr2.Code, rr2.Body.String())
 	}
@@ -113,6 +115,7 @@ func TestBindKeyHandler_DuplicateKey(t *testing.T) {
 func TestBindKeyHandler_BudgetLimit(t *testing.T) {
 	st, cleanup := testutil.OpenTestStore(t)
 	defer cleanup()
+	router := newTestRouter(st, testServerConfig(http.StatusOK, t))
 
 	ctx := context.Background()
 	if err := st.UpsertProviderRate(ctx, "openai", 0.0001, 1000, 1); err != nil {
@@ -133,7 +136,7 @@ func TestBindKeyHandler_BudgetLimit(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	rr := httptest.NewRecorder()
 
-	bindKeyHandler(st, testServerConfig(http.StatusOK, t)).ServeHTTP(rr, req)
+	router.ServeHTTP(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -142,6 +145,7 @@ func TestBindKeyHandler_BudgetLimit(t *testing.T) {
 func TestBindKeyHandler_Cooldown(t *testing.T) {
 	st, cleanup := testutil.OpenTestStore(t)
 	defer cleanup()
+	router := newTestRouter(st, testServerConfig(http.StatusOK, t))
 
 	ctx := context.Background()
 	if err := st.UpsertProviderRate(ctx, "openai", 0.0001, 1000, 1); err != nil {
@@ -161,7 +165,7 @@ func TestBindKeyHandler_Cooldown(t *testing.T) {
 	req1 := httptest.NewRequest(http.MethodPost, "/api/agents/bind_key", bytes.NewReader(body1))
 	req1.Header.Set("Authorization", "Bearer "+apiKey)
 	rr1 := httptest.NewRecorder()
-	bindKeyHandler(st, testServerConfig(http.StatusOK, t)).ServeHTTP(rr1, req1)
+	router.ServeHTTP(rr1, req1)
 	if rr1.Code != http.StatusOK {
 		t.Fatalf("expected first bind 200, got %d: %s", rr1.Code, rr1.Body.String())
 	}
@@ -170,7 +174,7 @@ func TestBindKeyHandler_Cooldown(t *testing.T) {
 	req2 := httptest.NewRequest(http.MethodPost, "/api/agents/bind_key", bytes.NewReader(body2))
 	req2.Header.Set("Authorization", "Bearer "+apiKey)
 	rr2 := httptest.NewRecorder()
-	bindKeyHandler(st, testServerConfig(http.StatusOK, t)).ServeHTTP(rr2, req2)
+	router.ServeHTTP(rr2, req2)
 	if rr2.Code != http.StatusTooManyRequests {
 		t.Fatalf("expected 429, got %d: %s", rr2.Code, rr2.Body.String())
 	}
@@ -179,6 +183,7 @@ func TestBindKeyHandler_Cooldown(t *testing.T) {
 func TestBindKeyHandler_BlacklistAfterInvalidKeys(t *testing.T) {
 	st, cleanup := testutil.OpenTestStore(t)
 	defer cleanup()
+	router := newTestRouter(st, testServerConfig(http.StatusUnauthorized, t))
 
 	ctx := context.Background()
 	if err := st.UpsertProviderRate(ctx, "openai", 0.0001, 1000, 1); err != nil {
@@ -199,7 +204,7 @@ func TestBindKeyHandler_BlacklistAfterInvalidKeys(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/agents/bind_key", bytes.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 		rr := httptest.NewRecorder()
-		bindKeyHandler(st, testServerConfig(http.StatusUnauthorized, t)).ServeHTTP(rr, req)
+		router.ServeHTTP(rr, req)
 		if i < 2 && rr.Code != http.StatusUnauthorized {
 			t.Fatalf("expected 401, got %d: %s", rr.Code, rr.Body.String())
 		}
@@ -220,6 +225,7 @@ func TestBindKeyHandler_BlacklistAfterInvalidKeys(t *testing.T) {
 func TestAgentMeHandler(t *testing.T) {
 	st, cleanup := testutil.OpenTestStore(t)
 	defer cleanup()
+	router := newTestRouter(st, config.ServerConfig{})
 
 	ctx := context.Background()
 	apiKey := "apa_key_me"
@@ -232,7 +238,7 @@ func TestAgentMeHandler(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	rr := httptest.NewRecorder()
 
-	agentAuthMiddleware(st)(agentMeHandler(st)).ServeHTTP(rr, req)
+	router.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -259,11 +265,12 @@ func TestAgentMeHandler(t *testing.T) {
 func TestAgentMeHandler_Unauthorized(t *testing.T) {
 	st, cleanup := testutil.OpenTestStore(t)
 	defer cleanup()
+	router := newTestRouter(st, config.ServerConfig{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/me", nil)
 	rr := httptest.NewRecorder()
 
-	agentAuthMiddleware(st)(agentMeHandler(st)).ServeHTTP(rr, req)
+	router.ServeHTTP(rr, req)
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d: %s", rr.Code, rr.Body.String())
 	}

@@ -1,4 +1,4 @@
-.PHONY: dev test web-build dev-all sqlc migrate-up migrate-down migrate-force migrate-version migrate-create
+.PHONY: dev test lint web-build dev-all sqlc migrate-up migrate-down migrate-force migrate-version migrate-create
 
 MIGRATE ?= migrate
 MIGRATIONS_DIR ?= migrations
@@ -9,6 +9,13 @@ dev:
 
 test:
 	go test ./...
+
+lint:
+	@if command -v golangci-lint >/dev/null 2>&1; then \
+		golangci-lint run ./...; \
+	else \
+		GOCACHE=$${GOCACHE:-/tmp/go-build} go test ./...; \
+	fi
 
 sqlc:
 	CGO_ENABLED=0 go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.27.0 generate
