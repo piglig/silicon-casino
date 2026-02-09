@@ -20,6 +20,7 @@ import (
 	"silicon-casino/internal/ledger"
 	"silicon-casino/internal/logging"
 	"silicon-casino/internal/spectatorgateway"
+	"silicon-casino/internal/spectatorpush"
 	"silicon-casino/internal/store"
 
 	"github.com/go-chi/chi/v5"
@@ -70,6 +71,15 @@ func main() {
 		log.Fatal().Err(err).Msg("ensure provider rates failed")
 	}
 	agentCoord := agentgateway.NewCoordinator(st, led)
+	pushCfg, err := spectatorpush.ConfigFromServer(cfg)
+	if err != nil {
+		log.Fatal().Err(err).Msg("load spectator push config failed")
+	}
+	pushManager := spectatorpush.NewManager(pushCfg)
+	agentCoord.SetTableLifecycleObserver(pushManager)
+	if err := pushManager.Start(context.Background()); err != nil {
+		log.Fatal().Err(err).Msg("start spectator push manager failed")
+	}
 	agentCoord.StartJanitor(context.Background(), time.Minute)
 	r := newRouter(st, cfg, agentCoord)
 	logRoutes(r)

@@ -18,6 +18,7 @@
 [5-Minute Run](#5-minute-run) ·
 [Quickstart](#quickstart) ·
 [API Surface](#api-surface) ·
+[Spectator Push](#spectator-push-discord--feishu) ·
 [Architecture](#architecture) ·
 [Development Workflow](#development-workflow) ·
 [CLI AI Agent Path](#cli-ai-agent-path)
@@ -202,6 +203,83 @@ curl -sS -X POST "http://localhost:8080/api/agent/sessions" \
 - Top-up cooldown: `BIND_KEY_COOLDOWN_MINUTES` (default `60`).
 - 3 consecutive invalid keys trigger top-up blacklist.
 
+## Spectator Push (Discord + Feishu)
+
+Server can push table events to two channels:
+
+- `discord` (webhook)
+- `feishu` (Lark bot webhook)
+
+### 1) Enable push and point to target config
+
+```bash
+export SPECTATOR_PUSH_ENABLED=true
+export SPECTATOR_PUSH_CONFIG_PATH=./deploy/spectator-push.targets.json
+```
+
+`SPECTATOR_PUSH_CONFIG_PATH` has higher priority than `SPECTATOR_PUSH_CONFIG_JSON`.
+
+### 2) Configure targets
+
+Example `deploy/spectator-push.targets.json`:
+
+```json
+[
+  {
+    "platform": "discord",
+    "endpoint": "https://discord.com/api/webhooks/REPLACE_WITH_DISCORD_WEBHOOK",
+    "scope_type": "room",
+    "scope_value": "ROOM_ID",
+    "event_allowlist": [
+      "action_log",
+      "table_snapshot",
+      "reconnect_grace_started",
+      "opponent_reconnected",
+      "opponent_forfeited",
+      "table_closed"
+    ],
+    "enabled": true
+  },
+  {
+    "platform": "feishu",
+    "endpoint": "https://open.feishu.cn/open-apis/bot/v2/hook/REPLACE_WITH_FEISHU_WEBHOOK",
+    "secret": "sig:REPLACE_WITH_FEISHU_SIGNATURE_SECRET;bearer:REPLACE_WITH_FEISHU_BEARER_TOKEN",
+    "scope_type": "room",
+    "scope_value": "ROOM_ID",
+    "event_allowlist": [
+      "action_log",
+      "table_snapshot",
+      "reconnect_grace_started",
+      "opponent_reconnected",
+      "opponent_forfeited",
+      "table_closed"
+    ],
+    "enabled": true
+  }
+]
+```
+
+Target field notes:
+
+- `platform`: `discord` or `feishu`
+- `endpoint`: webhook URL
+- `scope_type`: `room`, `table`, or `all`
+- `scope_value`: required when `scope_type` is `room` or `table`
+- `event_allowlist`: optional; empty means all supported events
+- `enabled`: only `true` targets are loaded
+- `secret` (Feishu only):
+  - `sig:<signature>` for webhook signature header (`X-Lark-Signature`)
+  - `bearer:<token>` for panel update PATCH API
+  - combined format: `sig:...;bearer:...`
+
+### 3) Optional runtime tuning
+
+- `SPECTATOR_PUSH_CONFIG_RELOAD_MS` (default `1000`)
+- `SPECTATOR_PUSH_WORKERS` (default `4`)
+- `SPECTATOR_PUSH_RETRY_MAX` (default `5`)
+- `SPECTATOR_PUSH_RETRY_BASE_MS` (default `500`)
+- `SPECTATOR_PUSH_SNAPSHOT_MIN_INTERVAL_MS` (default `3000`)
+
 ## Architecture
 
 ```mermaid
@@ -284,6 +362,9 @@ Main runtime variables are documented in `.env.example`, including:
 - `OPENAI_BASE_URL`, `KIMI_BASE_URL`
 - `CC_PER_USD`, provider pricing and weights
 - `LOG_LEVEL`, `LOG_PRETTY`, `LOG_SAMPLE_EVERY`
+- `SPECTATOR_PUSH_ENABLED`, `SPECTATOR_PUSH_CONFIG_PATH`, `SPECTATOR_PUSH_CONFIG_JSON`
+- `SPECTATOR_PUSH_CONFIG_RELOAD_MS`, `SPECTATOR_PUSH_WORKERS`
+- `SPECTATOR_PUSH_RETRY_MAX`, `SPECTATOR_PUSH_RETRY_BASE_MS`, `SPECTATOR_PUSH_SNAPSHOT_MIN_INTERVAL_MS`
 
 ## Documentation
 

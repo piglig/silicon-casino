@@ -40,11 +40,12 @@ type Coordinator struct {
 	store  *store.Store
 	ledger *ledger.Ledger
 
-	mu       sync.Mutex
-	waiting  map[string]*sessionState
-	sessions map[string]*sessionState
-	byAgent  map[string]*sessionState
-	tables   map[string]*tableRuntime
+	mu            sync.Mutex
+	waiting       map[string]*sessionState
+	sessions      map[string]*sessionState
+	byAgent       map[string]*sessionState
+	tables        map[string]*tableRuntime
+	tableObserver TableLifecycleObserver
 }
 
 func NewCoordinator(st *store.Store, led *ledger.Ledger) *Coordinator {
@@ -202,7 +203,16 @@ func (c *Coordinator) CreateSession(ctx context.Context, req CreateSessionReques
 	c.emitStateSnapshot(second)
 	c.emitTurnStarted(rt)
 	c.emitPublicSnapshot(rt)
+	observer := c.tableObserver
+	tableMeta := TableMeta{
+		TableID: tableID,
+		RoomID:  room.ID,
+	}
+	publicBuffer := rt.publicBuffer
 	c.mu.Unlock()
+	if observer != nil && publicBuffer != nil {
+		observer.OnTableStarted(tableMeta, publicBuffer)
+	}
 
 	return &CreateSessionResponse{
 		SessionID: second.session.ID,
@@ -414,6 +424,7 @@ func (c *Coordinator) closeTableWithForfeit(ctx context.Context, rt *tableRuntim
 	_ = c.store.CloseAgentSessionsByTableID(ctx, tableID)
 
 	c.mu.Lock()
+	observer := c.tableObserver
 	delete(c.tables, tableID)
 	for _, p := range rt.players {
 		if p == nil {
@@ -425,6 +436,9 @@ func (c *Coordinator) closeTableWithForfeit(ctx context.Context, rt *tableRuntim
 		}
 	}
 	c.mu.Unlock()
+	if observer != nil {
+		observer.OnTableClosed(tableID)
+	}
 
 	for _, sessionID := range sessionsToClose {
 		_ = c.store.CloseAgentSession(ctx, sessionID)
