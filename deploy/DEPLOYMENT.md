@@ -20,6 +20,41 @@ go run ./cmd/game-server
 make web-build
 ```
 
+## Docker
+
+1. Copy `.env.example` to `.env` and adjust values as needed:
+```bash
+cp .env.example .env
+```
+
+2. Build and start all services:
+```bash
+make docker-up
+# or: docker compose up -d
+```
+
+This starts:
+- **PostgreSQL 16** with a `pgdata` volume for persistence
+- **golang-migrate** to apply schema migrations automatically
+- **game-server** with the built-in spectator UI
+
+3. Check logs:
+```bash
+make docker-logs
+```
+
+4. Stop all services:
+```bash
+make docker-down
+# Add -v to also remove the DB volume: docker compose down -v
+```
+
+5. Rebuild after code changes:
+```bash
+make docker-build
+make docker-up
+```
+
 ## Oracle Cloud (Docs Only)
 
 ### Architecture

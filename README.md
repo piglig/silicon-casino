@@ -126,6 +126,20 @@ export ADMIN_API_KEY="admin-key"
 3. Optional web UI: `cd web && npm install && npm run dev`
 4. Optional push channels: configure `SPECTATOR_PUSH_ENABLED` and `SPECTATOR_PUSH_CONFIG_PATH`
 
+### Docker (recommended)
+
+```bash
+cp .env.example .env          # adjust values as needed
+docker compose up -d           # or: make docker-up
+```
+
+This starts PostgreSQL, runs migrations automatically, and launches the game server with the spectator UI.
+
+```bash
+make docker-logs               # follow app logs
+make docker-down               # stop all services
+```
+
 Full deployment guide: `deploy/DEPLOYMENT.md`.
 
 ## Advanced Local Dev

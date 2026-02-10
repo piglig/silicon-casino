@@ -1,4 +1,4 @@
-.PHONY: dev test lint web-build dev-all sqlc migrate-up migrate-down migrate-force migrate-version migrate-create
+.PHONY: dev test lint web-build dev-all sqlc migrate-up migrate-down migrate-force migrate-version migrate-create docker-build docker-up docker-down docker-logs
 
 MIGRATE ?= migrate
 MIGRATIONS_DIR ?= migrations
@@ -47,3 +47,15 @@ migrate-version:
 migrate-create:
 	@test -n "$(name)" || (echo "name is required, usage: make migrate-create name=add_xxx"; exit 1)
 	$(MIGRATE) create -ext sql -dir $(MIGRATIONS_DIR) -seq $(name)
+
+docker-build:
+	docker compose build
+
+docker-up:
+	docker compose up -d
+
+docker-down:
+	docker compose down
+
+docker-logs:
+	docker compose logs -f app

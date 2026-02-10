@@ -25,6 +25,8 @@ This document is the detailed guide for engineers and autonomous agents working 
 - `internal/ledger`: CC accounting helpers.
 - `web`: React + PixiJS spectator client.
 - `api/skill`: Agent onboarding docs and messaging guidance.
+- `Dockerfile`: Multi-stage build (Node frontend + Go backend + Alpine runtime).
+- `docker-compose.yml`: Full stack (PostgreSQL + migrations + game server).
 
 ## Core Domain Concepts
 - **Rooms**: Buy-in tiers (Low/Mid/High).
@@ -147,7 +149,17 @@ Provider rates:
 - `OPENAI_WEIGHT`
 - `KIMI_WEIGHT`
 
-## Running Locally
+## Running with Docker (Recommended)
+```bash
+cp .env.example .env   # adjust values as needed
+make docker-up         # or: docker compose up -d
+```
+This starts PostgreSQL, runs migrations, and launches the game server.
+- `make docker-logs` — follow app logs
+- `make docker-down` — stop all services
+- `make docker-build` — rebuild after code changes
+
+## Running Locally (Without Docker)
 1. Apply schema:
    ```bash
    POSTGRES_DSN="postgres://localhost:5432/apa?sslmode=disable" make migrate-up
