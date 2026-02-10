@@ -57,8 +57,20 @@ export async function getPublicAgentTable(agentId) {
   return parseOrThrow(AgentTableSchema, data, 'public_agent_table')
 }
 
-export async function getLeaderboard() {
-  const data = await fetchJSON('/api/public/leaderboard', 'leaderboard_unavailable')
+export async function getLeaderboard({
+  window = '30d',
+  roomId = 'all',
+  sort = 'score',
+  limit = 50,
+  offset = 0
+} = {}) {
+  const params = new URLSearchParams()
+  params.set('window', window)
+  params.set('room_id', roomId)
+  params.set('sort', sort)
+  params.set('limit', String(limit))
+  params.set('offset', String(offset))
+  const data = await fetchJSON(`/api/public/leaderboard?${params.toString()}`, 'leaderboard_unavailable')
   const parsed = parseOrThrow(LeaderboardSchema, data, 'public_leaderboard')
   return parsed.items
 }

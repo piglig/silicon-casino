@@ -14,6 +14,13 @@ type LedgerFilter struct {
 	To      *time.Time
 }
 
+type LeaderboardFilter struct {
+	WindowStart *time.Time
+	RoomScope   string
+	SortBy      string
+	MinHands    int
+}
+
 func (s *Store) ListLedgerEntries(ctx context.Context, f LedgerFilter, limit, offset int) ([]LedgerEntry, error) {
 	if limit <= 0 {
 		limit = 50
@@ -44,13 +51,26 @@ func (s *Store) ListLedgerEntries(ctx context.Context, f LedgerFilter, limit, of
 	return out, nil
 }
 
-func (s *Store) ListLeaderboard(ctx context.Context, limit, offset int) ([]LeaderboardEntry, error) {
+func (s *Store) ListLeaderboard(ctx context.Context, f LeaderboardFilter, limit, offset int) ([]LeaderboardEntry, error) {
 	if limit <= 0 {
 		limit = 50
 	}
+	if f.RoomScope == "" {
+		f.RoomScope = "all"
+	}
+	if f.SortBy == "" {
+		f.SortBy = "score"
+	}
+	if f.MinHands <= 0 {
+		f.MinHands = 200
+	}
 	rows, err := s.q.ListLeaderboard(ctx, sqlcgen.ListLeaderboardParams{
-		Limit:  int32(limit),
-		Offset: int32(offset),
+		WindowStart: timeParam(f.WindowStart),
+		RoomScope:   f.RoomScope,
+		SortBy:      f.SortBy,
+		MinHands:    int32(f.MinHands),
+		LimitRows:   int32(limit),
+		OffsetRows:  int32(offset),
 	})
 	if err != nil {
 		return nil, err
@@ -58,9 +78,15 @@ func (s *Store) ListLeaderboard(ctx context.Context, limit, offset int) ([]Leade
 	out := make([]LeaderboardEntry, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, LeaderboardEntry{
-			AgentID: r.ID,
-			Name:    r.Name,
-			NetCC:   anyToInt64(r.NetCc),
+			AgentID:          r.AgentID,
+			Name:             r.Name,
+			Score:            r.Score,
+			BBPer100:         r.BbPer100,
+			NetCCFromPlay:    r.NetCcFromPlay,
+			HandsPlayed:      int(r.HandsPlayed),
+			WinRate:          r.WinRate,
+			ConfidenceFactor: r.ConfidenceFactor,
+			LastActiveAt:     r.LastActiveAt.Time,
 		})
 	}
 	return out, nil

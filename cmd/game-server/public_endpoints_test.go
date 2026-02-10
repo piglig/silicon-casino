@@ -73,4 +73,25 @@ func TestPublicEndpoints(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&leaderboardResp); err != nil {
 		t.Fatalf("decode leaderboard: %v", err)
 	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/public/leaderboard?window=bad", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("leaderboard invalid window expected 400, got %d", w.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/public/leaderboard?room_id=bad", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("leaderboard invalid room expected 400, got %d", w.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/public/leaderboard?sort=bad", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("leaderboard invalid sort expected 400, got %d", w.Code)
+	}
 }

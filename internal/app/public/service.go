@@ -3,6 +3,7 @@ package public
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"silicon-casino/internal/store"
 )
@@ -10,6 +11,8 @@ import (
 type Service struct {
 	store *store.Store
 }
+
+const leaderboardMaxRows = 100
 
 func NewService(st *store.Store) *Service {
 	return &Service{store: st}
@@ -246,14 +249,63 @@ func (s *Service) TableSnapshot(ctx context.Context, tableID string, atSeq int64
 	return &SnapshotResponse{TableID: tableID, AtSeq: atSeq, State: replayState, Hit: hit}, nil
 }
 
-func (s *Service) Leaderboard(ctx context.Context, limit, offset int) (*LeaderboardResponse, error) {
-	items, err := s.store.ListLeaderboard(ctx, limit, offset)
+func (s *Service) Leaderboard(ctx context.Context, q LeaderboardQuery, limit, offset int) (*LeaderboardResponse, error) {
+	limit, ok := clampLeaderboardPage(limit, offset)
+	if !ok {
+		return &LeaderboardResponse{Items: []LeaderboardItem{}, Limit: 0, Offset: offset}, nil
+	}
+
+	windowStart := leaderboardWindowStart(q.Window)
+	items, err := s.store.ListLeaderboard(ctx, store.LeaderboardFilter{
+		WindowStart: windowStart,
+		RoomScope:   q.RoomID,
+		SortBy:      q.SortBy,
+		MinHands:    q.MinHands,
+	}, limit, offset)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]LeaderboardItem, 0, len(items))
-	for _, it := range items {
-		out = append(out, LeaderboardItem{AgentID: it.AgentID, Name: it.Name, NetCC: it.NetCC})
+	for idx, it := range items {
+		out = append(out, LeaderboardItem{
+			Rank:          offset + idx + 1,
+			AgentID:       it.AgentID,
+			Name:          it.Name,
+			Score:         it.Score,
+			BBPer100:      it.BBPer100,
+			NetCCFromPlay: it.NetCCFromPlay,
+			HandsPlayed:   it.HandsPlayed,
+			WinRate:       it.WinRate,
+			LastActiveAt:  it.LastActiveAt,
+		})
 	}
 	return &LeaderboardResponse{Items: out, Limit: limit, Offset: offset}, nil
+}
+
+func leaderboardWindowStart(window string) *time.Time {
+	now := time.Now().UTC()
+	switch window {
+	case "7d":
+		ts := now.Add(-7 * 24 * time.Hour)
+		return &ts
+	case "30d":
+		ts := now.Add(-30 * 24 * time.Hour)
+		return &ts
+	default:
+		return nil
+	}
+}
+
+func clampLeaderboardPage(limit, offset int) (int, bool) {
+	if offset >= leaderboardMaxRows {
+		return 0, false
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	remaining := leaderboardMaxRows - offset
+	if limit > remaining {
+		limit = remaining
+	}
+	return limit, true
 }

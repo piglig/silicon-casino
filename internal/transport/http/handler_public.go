@@ -223,11 +223,55 @@ func (h *PublicHandlers) TableSnapshot() http.HandlerFunc {
 func (h *PublicHandlers) Leaderboard() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		limit, offset := ParsePagination(r)
-		resp, err := h.publicSvc.Leaderboard(r.Context(), limit, offset)
+		if limit > 100 {
+			limit = 100
+		}
+		window := r.URL.Query().Get("window")
+		if window == "" {
+			window = "30d"
+		}
+		if !isAllowedLeaderboardWindow(window) {
+			WriteHTTPError(w, http.StatusBadRequest, "invalid_request")
+			return
+		}
+		roomID := r.URL.Query().Get("room_id")
+		if roomID == "" {
+			roomID = "all"
+		}
+		if !isAllowedLeaderboardRoom(roomID) {
+			WriteHTTPError(w, http.StatusBadRequest, "invalid_request")
+			return
+		}
+		sortBy := r.URL.Query().Get("sort")
+		if sortBy == "" {
+			sortBy = "score"
+		}
+		if !isAllowedLeaderboardSort(sortBy) {
+			WriteHTTPError(w, http.StatusBadRequest, "invalid_request")
+			return
+		}
+		resp, err := h.publicSvc.Leaderboard(r.Context(), apppublic.LeaderboardQuery{
+			Window:   window,
+			RoomID:   roomID,
+			SortBy:   sortBy,
+			MinHands: 200,
+		}, limit, offset)
 		if err != nil {
 			WriteHTTPError(w, http.StatusInternalServerError, "internal_error")
 			return
 		}
 		_ = json.NewEncoder(w).Encode(resp)
 	}
+}
+
+func isAllowedLeaderboardWindow(v string) bool {
+	return v == "7d" || v == "30d" || v == "all"
+}
+
+func isAllowedLeaderboardRoom(v string) bool {
+	return v == "all" || v == "low" || v == "mid" || v == "high"
+}
+
+func isAllowedLeaderboardSort(v string) bool {
+	return v == "score" || v == "net_cc_from_play" || v == "hands_played" || v == "win_rate"
 }

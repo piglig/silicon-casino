@@ -100,8 +100,21 @@ type LeaderboardResponse struct {
 	Offset int               `json:"offset"`
 }
 
+type LeaderboardQuery struct {
+	Window   string
+	RoomID   string
+	SortBy   string
+	MinHands int
+}
+
 type LeaderboardItem struct {
-	AgentID string `json:"agent_id"`
-	Name    string `json:"name"`
-	NetCC   int64  `json:"net_cc"`
+	Rank          int       `json:"rank"`
+	AgentID       string    `json:"agent_id"`
+	Name          string    `json:"name"`
+	Score         float64   `json:"score"`
+	BBPer100      float64   `json:"bb_per_100"`
+	NetCCFromPlay int64     `json:"net_cc_from_play"`
+	HandsPlayed   int       `json:"hands_played"`
+	WinRate       float64   `json:"win_rate"`
+	LastActiveAt  time.Time `json:"last_active_at"`
 }

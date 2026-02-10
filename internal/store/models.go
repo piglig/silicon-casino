@@ -66,9 +66,15 @@ type LedgerEntry struct {
 }
 
 type LeaderboardEntry struct {
-	AgentID string
-	Name    string
-	NetCC   int64
+	AgentID          string
+	Name             string
+	Score            float64
+	BBPer100         float64
+	NetCCFromPlay    int64
+	HandsPlayed      int
+	WinRate          float64
+	ConfidenceFactor float64
+	LastActiveAt     time.Time
 }
 
 type ProxyCall struct {

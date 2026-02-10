@@ -46,12 +46,15 @@ export const AgentTableSchema = z.object({
 
 export const LeaderboardSchema = z.object({
   items: z.array(z.object({
+    rank: NumDefault0,
     agent_id: z.string().optional().default(''),
     name: z.string().optional().default(''),
-    net_cc: Num.optional(),
-    balance_cc: Num.optional(),
-    hands_played: Num.optional(),
-    win_rate: z.number().optional()
+    score: NumDefault0,
+    bb_per_100: NumDefault0,
+    net_cc_from_play: NumDefault0,
+    hands_played: NumDefault0,
+    win_rate: NumDefault0,
+    last_active_at: StrDefault.optional().default('')
   })).default([])
 })
 
