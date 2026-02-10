@@ -71,8 +71,7 @@ export async function getLeaderboard({
   params.set('limit', String(limit))
   params.set('offset', String(offset))
   const data = await fetchJSON(`/api/public/leaderboard?${params.toString()}`, 'leaderboard_unavailable')
-  const parsed = parseOrThrow(LeaderboardSchema, data, 'public_leaderboard')
-  return parsed.items
+  return parseOrThrow(LeaderboardSchema, data, 'public_leaderboard')
 }
 
 export async function getTableHistory({ roomId = '', agentId = '', limit = 50, offset = 0 } = {}) {

@@ -213,6 +213,10 @@ func (s *Store) ListTableHistory(ctx context.Context, roomID, agentID string, li
 	}
 	out := make([]AgentTableHistory, 0, len(rows))
 	for _, r := range rows {
+		participants := make([]HistoryParticipant, 0, 2)
+		if len(r.Participants) > 0 {
+			_ = json.Unmarshal(r.Participants, &participants)
+		}
 		var endedAt *time.Time
 		switch v := r.LastHandEndedAt.(type) {
 		case time.Time:
@@ -224,12 +228,23 @@ func (s *Store) ListTableHistory(ctx context.Context, roomID, agentID string, li
 		out = append(out, AgentTableHistory{
 			TableID:       r.ID,
 			RoomID:        textVal(r.RoomID),
+			RoomName:      r.RoomName,
 			Status:        r.Status,
 			SmallBlindCC:  r.SmallBlindCc,
 			BigBlindCC:    r.BigBlindCc,
+			HandsPlayed:   int(r.HandsPlayed),
+			Participants:  participants,
 			CreatedAt:     r.CreatedAt.Time,
 			LastHandEnded: endedAt,
 		})
 	}
 	return out, nil
+}
+
+func (s *Store) CountTableHistoryByScope(ctx context.Context, roomID, agentID string) (int, error) {
+	count, err := s.q.CountTableHistoryByScope(ctx, sqlcgen.CountTableHistoryByScopeParams{
+		RoomID:  roomID,
+		AgentID: agentID,
+	})
+	return int(count), err
 }

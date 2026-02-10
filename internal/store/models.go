@@ -185,9 +185,17 @@ type TableReplaySnapshot struct {
 type AgentTableHistory struct {
 	TableID       string
 	RoomID        string
+	RoomName      string
 	Status        string
 	SmallBlindCC  int64
 	BigBlindCC    int64
+	HandsPlayed   int
+	Participants  []HistoryParticipant
 	CreatedAt     time.Time
 	LastHandEnded *time.Time
+}
+
+type HistoryParticipant struct {
+	AgentID   string `json:"agent_id"`
+	AgentName string `json:"agent_name"`
 }

@@ -36,7 +36,6 @@ func TestPublicLeaderboardExcludesTopupAndRanksByPlayResults(t *testing.T) {
 	lb, err := st.ListLeaderboard(ctx, LeaderboardFilter{
 		RoomScope: "all",
 		SortBy:    "score",
-		MinHands:  200,
 	}, 10, 0)
 	if err != nil {
 		t.Fatalf("list leaderboard: %v", err)
@@ -55,7 +54,7 @@ func TestPublicLeaderboardExcludesTopupAndRanksByPlayResults(t *testing.T) {
 	}
 }
 
-func TestPublicLeaderboardRespectsRoomScopeAndMinHands(t *testing.T) {
+func TestPublicLeaderboardRespectsRoomScope(t *testing.T) {
 	st, ctx, cleanup := openStore(t)
 	defer cleanup()
 
@@ -93,7 +92,6 @@ func TestPublicLeaderboardRespectsRoomScopeAndMinHands(t *testing.T) {
 	lbLow, err := st.ListLeaderboard(ctx, LeaderboardFilter{
 		RoomScope: "low",
 		SortBy:    "score",
-		MinHands:  2,
 	}, 10, 0)
 	if err != nil {
 		t.Fatalf("list low leaderboard: %v", err)
@@ -105,7 +103,6 @@ func TestPublicLeaderboardRespectsRoomScopeAndMinHands(t *testing.T) {
 	lbMid, err := st.ListLeaderboard(ctx, LeaderboardFilter{
 		RoomScope: "mid",
 		SortBy:    "score",
-		MinHands:  2,
 	}, 10, 0)
 	if err != nil {
 		t.Fatalf("list mid leaderboard: %v", err)
@@ -114,17 +111,6 @@ func TestPublicLeaderboardRespectsRoomScopeAndMinHands(t *testing.T) {
 		t.Fatalf("expected %s first in mid scope", a2)
 	}
 
-	lbThreshold, err := st.ListLeaderboard(ctx, LeaderboardFilter{
-		RoomScope: "all",
-		SortBy:    "score",
-		MinHands:  7,
-	}, 10, 0)
-	if err != nil {
-		t.Fatalf("list threshold leaderboard: %v", err)
-	}
-	if len(lbThreshold) != 0 {
-		t.Fatalf("expected empty leaderboard with high min_hands, got %d", len(lbThreshold))
-	}
 }
 
 func TestPublicLeaderboardRespectsWindowStart(t *testing.T) {
@@ -152,7 +138,6 @@ func TestPublicLeaderboardRespectsWindowStart(t *testing.T) {
 		WindowStart: &future,
 		RoomScope:   "all",
 		SortBy:      "score",
-		MinHands:    1,
 	}, 10, 0)
 	if err != nil {
 		t.Fatalf("list future-scoped leaderboard: %v", err)
@@ -164,7 +149,6 @@ func TestPublicLeaderboardRespectsWindowStart(t *testing.T) {
 	lbAll, err := st.ListLeaderboard(ctx, LeaderboardFilter{
 		RoomScope: "all",
 		SortBy:    "score",
-		MinHands:  1,
 	}, 10, 0)
 	if err != nil {
 		t.Fatalf("list unscoped leaderboard: %v", err)
@@ -211,7 +195,6 @@ func TestPublicLeaderboardSortModes(t *testing.T) {
 	lbNet, err := st.ListLeaderboard(ctx, LeaderboardFilter{
 		RoomScope: "all",
 		SortBy:    "net_cc_from_play",
-		MinHands:  1,
 	}, 10, 0)
 	if err != nil {
 		t.Fatalf("list net leaderboard: %v", err)
@@ -223,7 +206,6 @@ func TestPublicLeaderboardSortModes(t *testing.T) {
 	lbHands, err := st.ListLeaderboard(ctx, LeaderboardFilter{
 		RoomScope: "all",
 		SortBy:    "hands_played",
-		MinHands:  1,
 	}, 10, 0)
 	if err != nil {
 		t.Fatalf("list hands leaderboard: %v", err)
@@ -235,13 +217,84 @@ func TestPublicLeaderboardSortModes(t *testing.T) {
 	lbWinRate, err := st.ListLeaderboard(ctx, LeaderboardFilter{
 		RoomScope: "all",
 		SortBy:    "win_rate",
-		MinHands:  1,
 	}, 10, 0)
 	if err != nil {
 		t.Fatalf("list win_rate leaderboard: %v", err)
 	}
 	if len(lbWinRate) == 0 || lbWinRate[0].AgentID != a1 {
 		t.Fatalf("expected %s first by win_rate", a1)
+	}
+}
+
+func TestTableHistoryIncludesHumanizedFieldsAndCount(t *testing.T) {
+	st, ctx, cleanup := openStore(t)
+	defer cleanup()
+
+	a1 := mustCreateAgent(t, st, ctx, "Alpha", "key-alpha", 100000)
+	a2 := mustCreateAgent(t, st, ctx, "Bravo", "key-bravo", 100000)
+
+	roomID, err := st.CreateRoom(ctx, "Mid", 5000, 100, 200)
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	tableID, err := st.CreateTable(ctx, roomID, "closed", 100, 200)
+	if err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	if err := st.CreateAgentSession(ctx, AgentSession{
+		ID:        NewID(),
+		AgentID:   a1,
+		RoomID:    roomID,
+		TableID:   tableID,
+		JoinMode:  "random",
+		Status:    "active",
+		ExpiresAt: time.Now().UTC().Add(30 * time.Minute),
+	}); err != nil {
+		t.Fatalf("create session a1: %v", err)
+	}
+	if err := st.CreateAgentSession(ctx, AgentSession{
+		ID:        NewID(),
+		AgentID:   a2,
+		RoomID:    roomID,
+		TableID:   tableID,
+		JoinMode:  "random",
+		Status:    "active",
+		ExpiresAt: time.Now().UTC().Add(30 * time.Minute),
+	}); err != nil {
+		t.Fatalf("create session a2: %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		if err := recordSettledHand(t, st, ctx, tableID, a1, a2, 100); err != nil {
+			t.Fatalf("record hand %d: %v", i, err)
+		}
+	}
+
+	total, err := st.CountTableHistoryByScope(ctx, roomID, "")
+	if err != nil {
+		t.Fatalf("count table history: %v", err)
+	}
+	if total != 1 {
+		t.Fatalf("expected total=1, got %d", total)
+	}
+
+	items, err := st.ListTableHistory(ctx, roomID, "", 10, 0)
+	if err != nil {
+		t.Fatalf("list table history: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(items))
+	}
+	row := items[0]
+	if row.RoomName != "Mid" {
+		t.Fatalf("expected room name Mid, got %q", row.RoomName)
+	}
+	if row.HandsPlayed != 3 {
+		t.Fatalf("expected hands_played=3, got %d", row.HandsPlayed)
+	}
+	if len(row.Participants) != 2 {
+		t.Fatalf("expected 2 participants, got %d", len(row.Participants))
 	}
 }
 

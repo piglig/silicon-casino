@@ -86,12 +86,39 @@ LIMIT $2 OFFSET $3;
 SELECT
   t.id,
   t.room_id,
+  r.name AS room_name,
   t.status,
   t.small_blind_cc,
   t.big_blind_cc,
+  COUNT(h.id)::int AS hands_played,
+  COALESCE(
+    (
+      SELECT jsonb_agg(
+        jsonb_build_object(
+          'agent_id', sp.agent_id,
+          'agent_name', sp.agent_name
+        )
+        ORDER BY sp.first_seen ASC
+      )
+      FROM (
+        SELECT
+          s.agent_id,
+          MIN(s.created_at) AS first_seen,
+          COALESCE(MAX(a.name), '') AS agent_name
+        FROM agent_sessions s
+        LEFT JOIN agents a ON a.id = s.agent_id
+        WHERE s.table_id = t.id
+        GROUP BY s.agent_id
+        ORDER BY MIN(s.created_at) ASC
+        LIMIT 2
+      ) sp
+    ),
+    '[]'::jsonb
+  ) AS participants,
   t.created_at,
   MAX(h.ended_at) AS last_hand_ended_at
 FROM tables t
+JOIN rooms r ON r.id = t.room_id
 LEFT JOIN hands h ON h.table_id = t.id
 WHERE (sqlc.arg(room_id)::text = '' OR t.room_id = sqlc.arg(room_id)::text)
   AND (
@@ -102,6 +129,19 @@ WHERE (sqlc.arg(room_id)::text = '' OR t.room_id = sqlc.arg(room_id)::text)
       WHERE s.table_id = t.id AND s.agent_id = sqlc.arg(agent_id)::text
     )
   )
-GROUP BY t.id, t.room_id, t.status, t.small_blind_cc, t.big_blind_cc, t.created_at
+GROUP BY t.id, t.room_id, r.name, t.status, t.small_blind_cc, t.big_blind_cc, t.created_at
 ORDER BY MAX(h.started_at) DESC NULLS LAST, t.created_at DESC
 LIMIT sqlc.arg(limit_rows) OFFSET sqlc.arg(offset_rows);
+
+-- name: CountTableHistoryByScope :one
+SELECT COUNT(*)::bigint
+FROM tables t
+WHERE (sqlc.arg(room_id)::text = '' OR t.room_id = sqlc.arg(room_id)::text)
+  AND (
+    sqlc.arg(agent_id)::text = ''
+    OR EXISTS (
+      SELECT 1
+      FROM agent_sessions s
+      WHERE s.table_id = t.id AND s.agent_id = sqlc.arg(agent_id)::text
+    )
+  );

@@ -292,12 +292,39 @@ const listTableHistory = `-- name: ListTableHistory :many
 SELECT
   t.id,
   t.room_id,
+  r.name AS room_name,
   t.status,
   t.small_blind_cc,
   t.big_blind_cc,
+  COUNT(h.id)::int AS hands_played,
+  COALESCE(
+    (
+      SELECT jsonb_agg(
+        jsonb_build_object(
+          'agent_id', sp.agent_id,
+          'agent_name', sp.agent_name
+        )
+        ORDER BY sp.first_seen ASC
+      )
+      FROM (
+        SELECT
+          s.agent_id,
+          MIN(s.created_at) AS first_seen,
+          COALESCE(MAX(a.name), '') AS agent_name
+        FROM agent_sessions s
+        LEFT JOIN agents a ON a.id = s.agent_id
+        WHERE s.table_id = t.id
+        GROUP BY s.agent_id
+        ORDER BY MIN(s.created_at) ASC
+        LIMIT 2
+      ) sp
+    ),
+    '[]'::jsonb
+  ) AS participants,
   t.created_at,
   MAX(h.ended_at) AS last_hand_ended_at
 FROM tables t
+JOIN rooms r ON r.id = t.room_id
 LEFT JOIN hands h ON h.table_id = t.id
 WHERE ($1::text = '' OR t.room_id = $1::text)
   AND (
@@ -308,7 +335,7 @@ WHERE ($1::text = '' OR t.room_id = $1::text)
       WHERE s.table_id = t.id AND s.agent_id = $2::text
     )
   )
-GROUP BY t.id, t.room_id, t.status, t.small_blind_cc, t.big_blind_cc, t.created_at
+GROUP BY t.id, t.room_id, r.name, t.status, t.small_blind_cc, t.big_blind_cc, t.created_at
 ORDER BY MAX(h.started_at) DESC NULLS LAST, t.created_at DESC
 LIMIT $4 OFFSET $3
 `
@@ -323,9 +350,12 @@ type ListTableHistoryParams struct {
 type ListTableHistoryRow struct {
 	ID              string
 	RoomID          pgtype.Text
+	RoomName        string
 	Status          string
 	SmallBlindCc    int64
 	BigBlindCc      int64
+	HandsPlayed     int32
+	Participants    []byte
 	CreatedAt       pgtype.Timestamptz
 	LastHandEndedAt interface{}
 }
@@ -347,9 +377,12 @@ func (q *Queries) ListTableHistory(ctx context.Context, arg ListTableHistoryPara
 		if err := rows.Scan(
 			&i.ID,
 			&i.RoomID,
+			&i.RoomName,
 			&i.Status,
 			&i.SmallBlindCc,
 			&i.BigBlindCc,
+			&i.HandsPlayed,
+			&i.Participants,
 			&i.CreatedAt,
 			&i.LastHandEndedAt,
 		); err != nil {
@@ -361,6 +394,32 @@ func (q *Queries) ListTableHistory(ctx context.Context, arg ListTableHistoryPara
 		return nil, err
 	}
 	return items, nil
+}
+
+const countTableHistoryByScope = `-- name: CountTableHistoryByScope :one
+SELECT COUNT(*)::bigint
+FROM tables t
+WHERE ($1::text = '' OR t.room_id = $1::text)
+  AND (
+    $2::text = ''
+    OR EXISTS (
+      SELECT 1
+      FROM agent_sessions s
+      WHERE s.table_id = t.id AND s.agent_id = $2::text
+    )
+  )
+`
+
+type CountTableHistoryByScopeParams struct {
+	RoomID  string
+	AgentID string
+}
+
+func (q *Queries) CountTableHistoryByScope(ctx context.Context, arg CountTableHistoryByScopeParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countTableHistoryByScope, arg.RoomID, arg.AgentID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const listTableReplayEventsFromSeq = `-- name: ListTableReplayEventsFromSeq :many

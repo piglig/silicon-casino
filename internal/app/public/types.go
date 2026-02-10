@@ -31,18 +31,27 @@ type TableItem struct {
 
 type TableHistoryResponse struct {
 	Items  []TableHistoryItem `json:"items"`
+	Total  int                `json:"total"`
 	Limit  int                `json:"limit"`
 	Offset int                `json:"offset"`
 }
 
 type TableHistoryItem struct {
-	TableID       string     `json:"table_id"`
-	RoomID        string     `json:"room_id"`
-	Status        string     `json:"status"`
-	SmallBlindCC  int64      `json:"small_blind_cc"`
-	BigBlindCC    int64      `json:"big_blind_cc"`
-	CreatedAt     time.Time  `json:"created_at"`
-	LastHandEnded *time.Time `json:"last_hand_ended_at"`
+	TableID       string                    `json:"table_id"`
+	RoomID        string                    `json:"room_id"`
+	RoomName      string                    `json:"room_name"`
+	Status        string                    `json:"status"`
+	SmallBlindCC  int64                     `json:"small_blind_cc"`
+	BigBlindCC    int64                     `json:"big_blind_cc"`
+	HandsPlayed   int                       `json:"hands_played"`
+	Participants  []TableHistoryParticipant `json:"participants"`
+	CreatedAt     time.Time                 `json:"created_at"`
+	LastHandEnded *time.Time                `json:"last_hand_ended_at"`
+}
+
+type TableHistoryParticipant struct {
+	AgentID   string `json:"agent_id"`
+	AgentName string `json:"agent_name"`
 }
 
 type AgentTableResponse struct {
@@ -96,15 +105,15 @@ type SnapshotResponse struct {
 
 type LeaderboardResponse struct {
 	Items  []LeaderboardItem `json:"items"`
+	Total  int               `json:"total"`
 	Limit  int               `json:"limit"`
 	Offset int               `json:"offset"`
 }
 
 type LeaderboardQuery struct {
-	Window   string
-	RoomID   string
-	SortBy   string
-	MinHands int
+	Window string
+	RoomID string
+	SortBy string
 }
 
 type LeaderboardItem struct {

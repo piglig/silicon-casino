@@ -3,6 +3,9 @@ package public
 import (
 	"testing"
 	"time"
+
+	"silicon-casino/internal/store"
+	"silicon-casino/internal/testutil"
 )
 
 func TestClampLeaderboardPage(t *testing.T) {
@@ -65,5 +68,73 @@ func TestLeaderboardWindowStart(t *testing.T) {
 				t.Fatalf("diff=%v out of expected range around %v", diff, tt.wantRange)
 			}
 		})
+	}
+}
+
+func TestTableHistoryIncludesTotalAndSupportsOffsetBeyondTotal(t *testing.T) {
+	st, cleanup := testutil.OpenTestStore(t)
+	defer cleanup()
+	svc := NewService(st)
+	ctx := t.Context()
+
+	agentA, err := st.CreateAgent(ctx, "A", "api-a", "claim-a")
+	if err != nil {
+		t.Fatalf("create agent A: %v", err)
+	}
+	agentB, err := st.CreateAgent(ctx, "B", "api-b", "claim-b")
+	if err != nil {
+		t.Fatalf("create agent B: %v", err)
+	}
+	roomID, err := st.CreateRoom(ctx, "Mid", 5000, 100, 200)
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	tableID, err := st.CreateTable(ctx, roomID, "closed", 100, 200)
+	if err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	if err := st.CreateAgentSession(ctx, store.AgentSession{
+		ID:        store.NewID(),
+		AgentID:   agentA,
+		RoomID:    roomID,
+		TableID:   tableID,
+		JoinMode:  "random",
+		Status:    "active",
+		ExpiresAt: time.Now().UTC().Add(1 * time.Hour),
+	}); err != nil {
+		t.Fatalf("create session A: %v", err)
+	}
+	if err := st.CreateAgentSession(ctx, store.AgentSession{
+		ID:        store.NewID(),
+		AgentID:   agentB,
+		RoomID:    roomID,
+		TableID:   tableID,
+		JoinMode:  "random",
+		Status:    "active",
+		ExpiresAt: time.Now().UTC().Add(1 * time.Hour),
+	}); err != nil {
+		t.Fatalf("create session B: %v", err)
+	}
+
+	resp, err := svc.TableHistory(ctx, roomID, "", 20, 0)
+	if err != nil {
+		t.Fatalf("table history: %v", err)
+	}
+	if resp.Total != 1 {
+		t.Fatalf("expected total=1, got %d", resp.Total)
+	}
+	if len(resp.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(resp.Items))
+	}
+
+	resp2, err := svc.TableHistory(ctx, roomID, "", 20, 20)
+	if err != nil {
+		t.Fatalf("table history with high offset: %v", err)
+	}
+	if resp2.Total != 1 {
+		t.Fatalf("expected total still 1, got %d", resp2.Total)
+	}
+	if len(resp2.Items) != 0 {
+		t.Fatalf("expected empty page for high offset, got %d", len(resp2.Items))
 	}
 }

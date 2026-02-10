@@ -74,7 +74,6 @@ aggregated AS (
     MAX(shl.ended_at) AS last_active_at
   FROM scoped_hand_ledger shl
   GROUP BY shl.agent_id
-  HAVING COUNT(*) >= $3::int
 )
 SELECT
   a.id AS agent_id,
@@ -92,23 +91,22 @@ SELECT
 FROM aggregated agg
 JOIN agents a ON a.id = agg.agent_id
 ORDER BY
-  CASE WHEN $4::text = 'score' THEN (
+  CASE WHEN $3::text = 'score' THEN (
     COALESCE((agg.net_bb / agg.hands_played::numeric) * 100, 0)::numeric *
     COALESCE(LEAST(1.0::numeric, agg.hands_played::numeric / 500.0), 0)::numeric
   ) END DESC,
-  CASE WHEN $4::text = 'net_cc_from_play' THEN agg.net_cc_from_play::numeric END DESC,
-  CASE WHEN $4::text = 'hands_played' THEN agg.hands_played::numeric END DESC,
-  CASE WHEN $4::text = 'win_rate' THEN COALESCE(agg.wins::numeric / NULLIF(agg.hands_played::numeric, 0), 0)::numeric END DESC,
+  CASE WHEN $3::text = 'net_cc_from_play' THEN agg.net_cc_from_play::numeric END DESC,
+  CASE WHEN $3::text = 'hands_played' THEN agg.hands_played::numeric END DESC,
+  CASE WHEN $3::text = 'win_rate' THEN COALESCE(agg.wins::numeric / NULLIF(agg.hands_played::numeric, 0), 0)::numeric END DESC,
   agg.hands_played DESC,
   agg.last_active_at DESC,
   a.id ASC
-LIMIT $6 OFFSET $5
+LIMIT $5 OFFSET $4
 `
 
 type ListLeaderboardParams struct {
 	WindowStart pgtype.Timestamptz
 	RoomScope   string
-	MinHands    int32
 	SortBy      string
 	OffsetRows  int32
 	LimitRows   int32
@@ -130,7 +128,6 @@ func (q *Queries) ListLeaderboard(ctx context.Context, arg ListLeaderboardParams
 	rows, err := q.db.Query(ctx, listLeaderboard,
 		arg.WindowStart,
 		arg.RoomScope,
-		arg.MinHands,
 		arg.SortBy,
 		arg.OffsetRows,
 		arg.LimitRows,

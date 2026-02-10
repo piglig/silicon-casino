@@ -18,7 +18,6 @@ type LeaderboardFilter struct {
 	WindowStart *time.Time
 	RoomScope   string
 	SortBy      string
-	MinHands    int
 }
 
 func (s *Store) ListLedgerEntries(ctx context.Context, f LedgerFilter, limit, offset int) ([]LedgerEntry, error) {
@@ -61,14 +60,10 @@ func (s *Store) ListLeaderboard(ctx context.Context, f LeaderboardFilter, limit,
 	if f.SortBy == "" {
 		f.SortBy = "score"
 	}
-	if f.MinHands <= 0 {
-		f.MinHands = 200
-	}
 	rows, err := s.q.ListLeaderboard(ctx, sqlcgen.ListLeaderboardParams{
 		WindowStart: timeParam(f.WindowStart),
 		RoomScope:   f.RoomScope,
 		SortBy:      f.SortBy,
-		MinHands:    int32(f.MinHands),
 		LimitRows:   int32(limit),
 		OffsetRows:  int32(offset),
 	})

@@ -56,23 +56,37 @@ func (s *Service) Tables(ctx context.Context, roomID string, limit, offset int) 
 }
 
 func (s *Service) TableHistory(ctx context.Context, roomID, agentID string, limit, offset int) (*TableHistoryResponse, error) {
+	total, err := s.store.CountTableHistoryByScope(ctx, roomID, agentID)
+	if err != nil {
+		return nil, err
+	}
 	items, err := s.store.ListTableHistory(ctx, roomID, agentID, limit, offset)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]TableHistoryItem, 0, len(items))
 	for _, it := range items {
+		participants := make([]TableHistoryParticipant, 0, len(it.Participants))
+		for _, p := range it.Participants {
+			participants = append(participants, TableHistoryParticipant{
+				AgentID:   p.AgentID,
+				AgentName: p.AgentName,
+			})
+		}
 		out = append(out, TableHistoryItem{
 			TableID:       it.TableID,
 			RoomID:        it.RoomID,
+			RoomName:      it.RoomName,
 			Status:        it.Status,
 			SmallBlindCC:  it.SmallBlindCC,
 			BigBlindCC:    it.BigBlindCC,
+			HandsPlayed:   it.HandsPlayed,
+			Participants:  participants,
 			CreatedAt:     it.CreatedAt,
 			LastHandEnded: it.LastHandEnded,
 		})
 	}
-	return &TableHistoryResponse{Items: out, Limit: limit, Offset: offset}, nil
+	return &TableHistoryResponse{Items: out, Total: total, Limit: limit, Offset: offset}, nil
 }
 
 func (s *Service) AgentTables(ctx context.Context, agentID string, limit, offset int) (*TableHistoryResponse, error) {
@@ -88,14 +102,16 @@ func (s *Service) AgentTables(ctx context.Context, agentID string, limit, offset
 		out = append(out, TableHistoryItem{
 			TableID:       it.TableID,
 			RoomID:        it.RoomID,
+			RoomName:      it.RoomName,
 			Status:        it.Status,
 			SmallBlindCC:  it.SmallBlindCC,
 			BigBlindCC:    it.BigBlindCC,
+			HandsPlayed:   it.HandsPlayed,
 			CreatedAt:     it.CreatedAt,
 			LastHandEnded: it.LastHandEnded,
 		})
 	}
-	return &TableHistoryResponse{Items: out, Limit: limit, Offset: offset}, nil
+	return &TableHistoryResponse{Items: out, Total: len(out), Limit: limit, Offset: offset}, nil
 }
 
 func (s *Service) TableReplay(ctx context.Context, tableID string, fromSeq int64, limit int) (*ReplayResponse, error) {
@@ -250,23 +266,27 @@ func (s *Service) TableSnapshot(ctx context.Context, tableID string, atSeq int64
 }
 
 func (s *Service) Leaderboard(ctx context.Context, q LeaderboardQuery, limit, offset int) (*LeaderboardResponse, error) {
-	limit, ok := clampLeaderboardPage(limit, offset)
-	if !ok {
-		return &LeaderboardResponse{Items: []LeaderboardItem{}, Limit: 0, Offset: offset}, nil
-	}
-
 	windowStart := leaderboardWindowStart(q.Window)
-	items, err := s.store.ListLeaderboard(ctx, store.LeaderboardFilter{
+	allItems, err := s.store.ListLeaderboard(ctx, store.LeaderboardFilter{
 		WindowStart: windowStart,
 		RoomScope:   q.RoomID,
 		SortBy:      q.SortBy,
-		MinHands:    q.MinHands,
-	}, limit, offset)
+	}, leaderboardMaxRows, 0)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]LeaderboardItem, 0, len(items))
-	for idx, it := range items {
+	total := len(allItems)
+	limit, ok := clampLeaderboardPage(limit, offset)
+	if !ok || offset >= total {
+		return &LeaderboardResponse{Items: []LeaderboardItem{}, Total: total, Limit: limit, Offset: offset}, nil
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	pageItems := allItems[offset:end]
+	out := make([]LeaderboardItem, 0, len(pageItems))
+	for idx, it := range pageItems {
 		out = append(out, LeaderboardItem{
 			Rank:          offset + idx + 1,
 			AgentID:       it.AgentID,
@@ -279,7 +299,7 @@ func (s *Service) Leaderboard(ctx context.Context, q LeaderboardQuery, limit, of
 			LastActiveAt:  it.LastActiveAt,
 		})
 	}
-	return &LeaderboardResponse{Items: out, Limit: limit, Offset: offset}, nil
+	return &LeaderboardResponse{Items: out, Total: total, Limit: limit, Offset: offset}, nil
 }
 
 func leaderboardWindowStart(window string) *time.Time {

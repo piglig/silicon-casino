@@ -251,10 +251,9 @@ func (h *PublicHandlers) Leaderboard() http.HandlerFunc {
 			return
 		}
 		resp, err := h.publicSvc.Leaderboard(r.Context(), apppublic.LeaderboardQuery{
-			Window:   window,
-			RoomID:   roomID,
-			SortBy:   sortBy,
-			MinHands: 200,
+			Window: window,
+			RoomID: roomID,
+			SortBy: sortBy,
 		}, limit, offset)
 		if err != nil {
 			WriteHTTPError(w, http.StatusInternalServerError, "internal_error")

@@ -55,7 +55,10 @@ export const LeaderboardSchema = z.object({
     hands_played: NumDefault0,
     win_rate: NumDefault0,
     last_active_at: StrDefault.optional().default('')
-  })).default([])
+  })).default([]),
+  total: NumDefault0.optional().default(0),
+  limit: NumDefault0.optional().default(0),
+  offset: NumDefault0.optional().default(0)
 })
 
 export const TableHistorySchema = z.object({
@@ -63,11 +66,20 @@ export const TableHistorySchema = z.object({
     z.object({
       table_id: z.string(),
       room_id: z.string().optional().default(''),
+      room_name: z.string().optional().default(''),
       status: z.string().optional().default(''),
       small_blind_cc: NumDefault0,
-      big_blind_cc: NumDefault0
+      big_blind_cc: NumDefault0,
+      hands_played: NumDefault0.optional().default(0),
+      participants: z.array(z.object({
+        agent_id: z.string().optional().default(''),
+        agent_name: z.string().optional().default('')
+      })).optional().default([]),
+      created_at: StrDefault.optional().default(''),
+      last_hand_ended_at: StrDefault.optional().default('')
     })
   ).default([]),
+  total: NumDefault0.optional().default(0),
   limit: NumDefault0.optional(),
   offset: NumDefault0.optional()
 })

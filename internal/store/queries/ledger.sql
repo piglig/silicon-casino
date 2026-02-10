@@ -49,7 +49,6 @@ aggregated AS (
     MAX(shl.ended_at) AS last_active_at
   FROM scoped_hand_ledger shl
   GROUP BY shl.agent_id
-  HAVING COUNT(*) >= sqlc.arg(min_hands)::int
 )
 SELECT
   a.id AS agent_id,
