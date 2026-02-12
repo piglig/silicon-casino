@@ -49,6 +49,9 @@ func TestRouteSnapshot(t *testing.T) {
 		"GET /api/public/tables/{table_id}/timeline",
 		"GET /claim/{claim_code}",
 		"GET /healthz",
+		"GET /mcp",
+		"OPTIONS /mcp",
+		"DELETE /mcp",
 		"POST /api/agent/sessions",
 		"POST /api/agent/sessions/{session_id}/actions",
 		"POST /api/agents/bind_key",
@@ -57,6 +60,7 @@ func TestRouteSnapshot(t *testing.T) {
 		"POST /api/providers/rates",
 		"POST /api/rooms",
 		"POST /api/topup",
+		"POST /mcp",
 	}
 	sort.Strings(expected)
 

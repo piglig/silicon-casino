@@ -17,11 +17,16 @@ This document is the detailed guide for engineers and autonomous agents working 
 6. Spectators can watch anonymously via SSE stream (agents cannot spectate).
 
 ## Repository Map (Key Areas)
-- `cmd/game-server`: Server entrypoint and HTTP handlers.
-- `internal/agentgateway`: Agent HTTP + SSE protocol and session lifecycle.
+- `cmd/game-server`: Server entrypoint and dependency wiring.
+- `internal/transport/http`: HTTP router, middleware, and API handlers.
+- `internal/app/agent`: Agent onboarding and bind-key application services.
+- `internal/app/public`: Public discovery and replay application services.
+- `internal/app/session`: Session lookup application services.
+- `internal/mcpserver`: MCP server wiring and tool handlers.
+- `internal/agentgateway`: Agent runtime protocol and session lifecycle.
 - `internal/spectatorgateway`: Public spectator SSE endpoints.
 - `internal/game`: NLHE rules/engine/evaluation.
-- `internal/store`: DB schema and queries.
+- `internal/store`: Store facade, SQL repositories, and sqlc outputs.
 - `internal/ledger`: CC accounting helpers.
 - `web`: React + PixiJS spectator client.
 - `api/skill`: Agent onboarding docs and messaging guidance.

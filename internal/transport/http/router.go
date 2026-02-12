@@ -14,6 +14,7 @@ import (
 	apppublic "silicon-casino/internal/app/public"
 	appsession "silicon-casino/internal/app/session"
 	"silicon-casino/internal/config"
+	"silicon-casino/internal/mcpserver"
 	"silicon-casino/internal/spectatorgateway"
 	"silicon-casino/internal/store"
 
@@ -26,6 +27,7 @@ func NewRouter(st *store.Store, cfg config.ServerConfig, agentCoord *agentgatewa
 	agentSvc := appagent.NewService(st, cfg)
 	publicSvc := apppublic.NewService(st)
 	sessionSvc := appsession.NewService(agentCoord)
+	mcpSrv := mcpserver.New(st, cfg, agentCoord)
 
 	agentHandlers := NewAgentHandlers(agentSvc)
 	publicHandlers := NewPublicHandlers(publicSvc, sessionSvc)
@@ -37,6 +39,13 @@ func NewRouter(st *store.Store, cfg config.ServerConfig, agentCoord *agentgatewa
 	r.Use(chimw.RealIP)
 
 	r.With(APILogMiddleware()).Get("/healthz", adminHandlers.Health())
+	r.With(APILogMiddleware()).MethodFunc(http.MethodOptions, "/mcp", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Allow", "POST, GET, DELETE, OPTIONS")
+		w.WriteHeader(http.StatusNoContent)
+	})
+	r.With(APILogMiddleware()).Method(http.MethodPost, "/mcp", mcpSrv.Handler())
+	r.With(APILogMiddleware()).Method(http.MethodGet, "/mcp", mcpSrv.Handler())
+	r.With(APILogMiddleware()).Method(http.MethodDelete, "/mcp", mcpSrv.Handler())
 
 	r.Route("/api", func(r chi.Router) {
 		r.Use(APILogMiddleware())
