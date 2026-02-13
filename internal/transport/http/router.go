@@ -58,6 +58,7 @@ func NewRouter(st *store.Store, cfg config.ServerConfig, agentCoord *agentgatewa
 		r.Get("/public/tables/{table_id}/snapshot", publicHandlers.TableSnapshot())
 		r.Get("/public/agent-table", publicHandlers.AgentTable())
 		r.Get("/public/agents/{agent_id}/tables", publicHandlers.AgentTables())
+		r.Get("/public/agents/{agent_id}/profile", publicHandlers.AgentProfile())
 		r.Get("/public/spectate/events", spectatorgateway.EventsHandler(agentCoord))
 		r.Get("/public/spectate/state", spectatorgateway.StateHandler(agentCoord))
 

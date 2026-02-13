@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"silicon-casino/internal/store/sqlcgen"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type LedgerFilter struct {
@@ -85,4 +87,32 @@ func (s *Store) ListLeaderboard(ctx context.Context, f LeaderboardFilter, limit,
 		})
 	}
 	return out, nil
+}
+
+func (s *Store) GetAgentPerformanceByWindowAndAgent(ctx context.Context, agentID string, windowStart *time.Time) (*AgentPerformance, error) {
+	row, err := s.q.GetAgentPerformanceByWindowAndAgent(ctx, sqlcgen.GetAgentPerformanceByWindowAndAgentParams{
+		AgentID:     agentID,
+		WindowStart: timeParam(windowStart),
+	})
+	if err != nil {
+		return nil, mapNotFound(err)
+	}
+	var lastActiveAt *time.Time
+	switch v := row.LastActiveAt.(type) {
+	case time.Time:
+		vt := v
+		lastActiveAt = &vt
+	case pgtype.Timestamptz:
+		lastActiveAt = timePtrVal(v)
+	}
+	return &AgentPerformance{
+		AgentID:          row.AgentID,
+		Score:            row.Score,
+		BBPer100:         row.BbPer100,
+		NetCCFromPlay:    row.NetCcFromPlay,
+		HandsPlayed:      int(row.HandsPlayed),
+		WinRate:          row.WinRate,
+		ConfidenceFactor: row.ConfidenceFactor,
+		LastActiveAt:     lastActiveAt,
+	}, nil
 }

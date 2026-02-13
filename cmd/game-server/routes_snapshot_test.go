@@ -37,6 +37,7 @@ func TestRouteSnapshot(t *testing.T) {
 		"GET /api/ledger",
 		"GET /api/providers/rates",
 		"GET /api/public/agent-table",
+		"GET /api/public/agents/{agent_id}/profile",
 		"GET /api/public/agents/{agent_id}/tables",
 		"GET /api/public/leaderboard",
 		"GET /api/public/rooms",

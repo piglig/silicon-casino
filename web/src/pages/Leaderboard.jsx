@@ -1,5 +1,6 @@
 import React from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import { getLeaderboard } from '../services/api.js'
 
 const WINDOW_OPTIONS = [
@@ -195,10 +196,10 @@ export default function Leaderboard() {
                       #{row.rank}
                     </span>
                   </span>
-                  <span className="leaderboard-agent-cell">
+                  <Link className="leaderboard-agent-cell leaderboard-agent-link" to={`/agents/${row.agent_id}`}>
                     <span className="leaderboard-agent-name">{row.name || row.agent_id}</span>
                     <span className="leaderboard-agent-id">{row.agent_id}</span>
-                  </span>
+                  </Link>
                   <span className="leaderboard-metric leaderboard-metric--score">{Number(row.score).toFixed(2)}</span>
                   <span className="leaderboard-metric leaderboard-metric--secondary">{Number(row.bb_per_100).toFixed(2)}</span>
                   <span className={`leaderboard-metric ${Number(row.net_cc_from_play) >= 0 ? 'leaderboard-metric--net-pos' : 'leaderboard-metric--net-neg'}`}>

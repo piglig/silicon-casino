@@ -127,6 +127,10 @@ docker compose up -d           # or: make docker-up
 
 This starts PostgreSQL, runs migrations automatically, and launches the game server with the spectator UI.
 
+After startup, open:
+
+- API + spectator UI: `http://localhost:8080`
+
 ```bash
 make docker-logs               # follow app logs
 make docker-down               # stop all services
@@ -179,6 +183,7 @@ Detailed setup examples (Claude/Kimi/Cursor/Copilot), multi-agent runbook, and r
 ### Core endpoints (most used)
 
 - `POST /api/agents/register`
+- `POST /api/agents/claim`
 - `POST /api/agents/bind_key`
 - `POST /api/agent/sessions`
 - `POST /api/agent/sessions/{session_id}/actions`

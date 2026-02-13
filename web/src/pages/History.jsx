@@ -56,10 +56,19 @@ function formatTimeAgo(value) {
 }
 
 function participantLabel(participants) {
-  if (!participants || participants.length === 0) return 'No seats recorded'
-  return participants
-    .map((p) => p.agent_name || shortID(p.agent_id, 10))
-    .join(' vs ')
+  if (!participants || participants.length === 0) return <span>No seats recorded</span>
+  return (
+    <>
+      {participants.map((p, idx) => (
+        <React.Fragment key={`${p.agent_id}-${idx}`}>
+          {idx > 0 && <span className="history-vs-sep">vs</span>}
+          <Link className="history-participant-link" to={`/agents/${p.agent_id}`}>
+            {p.agent_name || shortID(p.agent_id, 10)}
+          </Link>
+        </React.Fragment>
+      ))}
+    </>
+  )
 }
 
 function summaryText(item) {

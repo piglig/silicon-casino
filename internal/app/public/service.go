@@ -3,6 +3,7 @@ package public
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"silicon-casino/internal/store"
@@ -112,6 +113,87 @@ func (s *Service) AgentTables(ctx context.Context, agentID string, limit, offset
 		})
 	}
 	return &TableHistoryResponse{Items: out, Total: len(out), Limit: limit, Offset: offset}, nil
+}
+
+func (s *Service) AgentProfile(ctx context.Context, agentID string, limit, offset int) (*AgentProfileResponse, error) {
+	if agentID == "" {
+		return nil, ErrInvalidRequest
+	}
+	agent, err := s.store.GetAgentByID(ctx, agentID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	window30d := leaderboardWindowStart("30d")
+	stats30d, err := s.store.GetAgentPerformanceByWindowAndAgent(ctx, agentID, window30d)
+	if err != nil {
+		return nil, err
+	}
+	statsAll, err := s.store.GetAgentPerformanceByWindowAndAgent(ctx, agentID, nil)
+	if err != nil {
+		return nil, err
+	}
+	total, err := s.store.CountTableHistoryByScope(ctx, "", agentID)
+	if err != nil {
+		return nil, err
+	}
+	items, err := s.store.ListTableHistory(ctx, "", agentID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TableHistoryItem, 0, len(items))
+	for _, it := range items {
+		participants := make([]TableHistoryParticipant, 0, len(it.Participants))
+		for _, p := range it.Participants {
+			participants = append(participants, TableHistoryParticipant{
+				AgentID:   p.AgentID,
+				AgentName: p.AgentName,
+			})
+		}
+		out = append(out, TableHistoryItem{
+			TableID:       it.TableID,
+			RoomID:        it.RoomID,
+			RoomName:      it.RoomName,
+			Status:        it.Status,
+			SmallBlindCC:  it.SmallBlindCC,
+			BigBlindCC:    it.BigBlindCC,
+			HandsPlayed:   it.HandsPlayed,
+			Participants:  participants,
+			CreatedAt:     it.CreatedAt,
+			LastHandEnded: it.LastHandEnded,
+		})
+	}
+	return &AgentProfileResponse{
+		Agent: AgentIdentity{
+			AgentID:   agent.ID,
+			Name:      agent.Name,
+			CreatedAt: agent.CreatedAt,
+		},
+		Stats30D: AgentPerformanceSnapshot{
+			Score:         stats30d.Score,
+			BBPer100:      stats30d.BBPer100,
+			NetCCFromPlay: stats30d.NetCCFromPlay,
+			HandsPlayed:   stats30d.HandsPlayed,
+			WinRate:       stats30d.WinRate,
+			LastActiveAt:  stats30d.LastActiveAt,
+		},
+		StatsAll: AgentPerformanceSnapshot{
+			Score:         statsAll.Score,
+			BBPer100:      statsAll.BBPer100,
+			NetCCFromPlay: statsAll.NetCCFromPlay,
+			HandsPlayed:   statsAll.HandsPlayed,
+			WinRate:       statsAll.WinRate,
+			LastActiveAt:  statsAll.LastActiveAt,
+		},
+		Tables: TableHistoryResponse{
+			Items:  out,
+			Total:  total,
+			Limit:  limit,
+			Offset: offset,
+		},
+	}, nil
 }
 
 func (s *Service) TableReplay(ctx context.Context, tableID string, fromSeq int64, limit int) (*ReplayResponse, error) {

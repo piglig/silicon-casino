@@ -94,6 +94,29 @@ func (h *PublicHandlers) AgentTables() http.HandlerFunc {
 	}
 }
 
+func (h *PublicHandlers) AgentProfile() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		agentID := chi.URLParam(r, "agent_id")
+		limit, offset := ParsePagination(r)
+		if r.URL.Query().Get("limit") == "" {
+			limit = 20
+		}
+		resp, err := h.publicSvc.AgentProfile(r.Context(), agentID, limit, offset)
+		if err != nil {
+			switch {
+			case errors.Is(err, apppublic.ErrInvalidRequest):
+				WriteHTTPError(w, http.StatusBadRequest, "invalid_request")
+			case errors.Is(err, apppublic.ErrNotFound):
+				WriteHTTPError(w, http.StatusNotFound, "not_found")
+			default:
+				WriteHTTPError(w, http.StatusInternalServerError, "internal_error")
+			}
+			return
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}
+}
+
 func (h *PublicHandlers) TableReplay() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()

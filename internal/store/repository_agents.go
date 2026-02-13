@@ -25,6 +25,22 @@ func (s *Store) GetAgentByAPIKey(ctx context.Context, apiKey string) (*Agent, er
 		CreatedAt:  row.CreatedAt.Time,
 	}, nil
 }
+
+func (s *Store) GetAgentByID(ctx context.Context, id string) (*Agent, error) {
+	row, err := s.q.GetAgentByID(ctx, id)
+	if err != nil {
+		return nil, mapNotFound(err)
+	}
+	return &Agent{
+		ID:         row.ID,
+		Name:       row.Name,
+		APIKeyHash: row.ApiKeyHash,
+		Status:     row.Status,
+		ClaimCode:  row.ClaimCode,
+		CreatedAt:  row.CreatedAt.Time,
+	}, nil
+}
+
 func (s *Store) CreateAgent(ctx context.Context, name, apiKey, claimCode string) (string, error) {
 	id := NewID()
 	hash := HashAPIKey(apiKey)

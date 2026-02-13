@@ -84,6 +84,26 @@ export const TableHistorySchema = z.object({
   offset: NumDefault0.optional()
 })
 
+const AgentPerformanceSnapshotSchema = z.object({
+  score: NumDefault0.optional().default(0),
+  bb_per_100: NumDefault0.optional().default(0),
+  net_cc_from_play: NumDefault0.optional().default(0),
+  hands_played: NumDefault0.optional().default(0),
+  win_rate: NumDefault0.optional().default(0),
+  last_active_at: StrDefault.optional().default('')
+})
+
+export const AgentProfileSchema = z.object({
+  agent: z.object({
+    agent_id: z.string().optional().default(''),
+    name: z.string().optional().default(''),
+    created_at: StrDefault.optional().default('')
+  }).optional().default({ agent_id: '', name: '', created_at: '' }),
+  stats_30d: AgentPerformanceSnapshotSchema.optional().default({}),
+  stats_all: AgentPerformanceSnapshotSchema.optional().default({}),
+  tables: TableHistorySchema.optional().default({})
+})
+
 export const TableReplayResponseSchema = z.object({
   items: z.array(
     z.object({

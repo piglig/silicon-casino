@@ -298,6 +298,54 @@ func TestTableHistoryIncludesHumanizedFieldsAndCount(t *testing.T) {
 	}
 }
 
+func TestGetAgentPerformanceByWindowAndAgent(t *testing.T) {
+	st, ctx, cleanup := openStore(t)
+	defer cleanup()
+
+	winner := mustCreateAgent(t, st, ctx, "Winner", "key-winner", 200000)
+	loser := mustCreateAgent(t, st, ctx, "Loser", "key-loser", 200000)
+	idle := mustCreateAgent(t, st, ctx, "Idle", "key-idle", 200000)
+
+	roomID, err := st.CreateRoom(ctx, "Low", 1000, 50, 100)
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	tableID, err := st.CreateTable(ctx, roomID, "closed", 50, 100)
+	if err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	for i := 0; i < 3; i++ {
+		if err := recordSettledHand(t, st, ctx, tableID, winner, loser, 100); err != nil {
+			t.Fatalf("record hand %d: %v", i, err)
+		}
+	}
+
+	active, err := st.GetAgentPerformanceByWindowAndAgent(ctx, winner, nil)
+	if err != nil {
+		t.Fatalf("active performance: %v", err)
+	}
+	if active.HandsPlayed != 3 {
+		t.Fatalf("expected 3 hands, got %d", active.HandsPlayed)
+	}
+	if active.NetCCFromPlay <= 0 {
+		t.Fatalf("expected positive net cc, got %d", active.NetCCFromPlay)
+	}
+	if active.LastActiveAt == nil {
+		t.Fatal("expected non-nil last_active_at")
+	}
+
+	idleStats, err := st.GetAgentPerformanceByWindowAndAgent(ctx, idle, nil)
+	if err != nil {
+		t.Fatalf("idle performance: %v", err)
+	}
+	if idleStats.HandsPlayed != 0 || idleStats.NetCCFromPlay != 0 {
+		t.Fatalf("expected zero stats for idle agent, got hands=%d net=%d", idleStats.HandsPlayed, idleStats.NetCCFromPlay)
+	}
+	if idleStats.LastActiveAt != nil {
+		t.Fatalf("expected nil last_active_at for idle agent, got %v", idleStats.LastActiveAt)
+	}
+}
+
 func recordSettledHand(t *testing.T, st *Store, ctx context.Context, tableID, winnerID, loserID string, amount int64) error {
 	t.Helper()
 

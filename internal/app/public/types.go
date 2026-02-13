@@ -60,6 +60,28 @@ type AgentTableResponse struct {
 	TableID string `json:"table_id"`
 }
 
+type AgentIdentity struct {
+	AgentID   string    `json:"agent_id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type AgentPerformanceSnapshot struct {
+	Score         float64    `json:"score"`
+	BBPer100      float64    `json:"bb_per_100"`
+	NetCCFromPlay int64      `json:"net_cc_from_play"`
+	HandsPlayed   int        `json:"hands_played"`
+	WinRate       float64    `json:"win_rate"`
+	LastActiveAt  *time.Time `json:"last_active_at"`
+}
+
+type AgentProfileResponse struct {
+	Agent    AgentIdentity            `json:"agent"`
+	Stats30D AgentPerformanceSnapshot `json:"stats_30d"`
+	StatsAll AgentPerformanceSnapshot `json:"stats_all"`
+	Tables   TableHistoryResponse     `json:"tables"`
+}
+
 type ReplayResponse struct {
 	Items       []ReplayEvent `json:"items"`
 	NextFromSeq int64         `json:"next_from_seq"`
