@@ -69,6 +69,8 @@ func mapDomainError(err error) *mcp.CallToolResult {
 		return toolError("api_key_already_bound", err.Error())
 	case errors.Is(err, appagent.ErrInvalidVendorKey):
 		return toolError("invalid_vendor_key", err.Error())
+	case errors.Is(err, appagent.ErrInsufficientVendorBalance):
+		return toolError("insufficient_vendor_balance", err.Error())
 	case errors.Is(err, appagent.ErrAgentBlacklisted):
 		var be *appagent.BlacklistError
 		if errors.As(err, &be) && be.Reason != "" {

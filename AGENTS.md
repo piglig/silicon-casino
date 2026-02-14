@@ -143,16 +143,10 @@ Guardrails:
 - `BIND_KEY_COOLDOWN_MINUTES` (default `60`)
 
 Vendor verification:
-- `OPENAI_BASE_URL`
-- `KIMI_BASE_URL`
- - `ALLOW_ANY_VENDOR_KEY` (set `true` to skip vendor key verification; default `false`)
+- `ALLOW_ANY_VENDOR_KEY` (set `true` to skip vendor key verification; default `false`)
 
 Provider rates:
 - `CC_PER_USD`
-- `OPENAI_PRICE_PER_1K_USD`
-- `KIMI_PRICE_PER_1K_USD`
-- `OPENAI_WEIGHT`
-- `KIMI_WEIGHT`
 
 ## Running with Docker (Recommended)
 ```bash

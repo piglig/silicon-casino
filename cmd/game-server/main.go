@@ -15,6 +15,12 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+const (
+	defaultOpenRouterPricePer1KUSD = 0.0001
+	defaultNebiusPricePer1KUSD     = 0.0001
+	defaultProviderWeight          = 1.0
+)
+
 func main() {
 	logCfg, err := config.LoadLog()
 	if err != nil {
@@ -70,16 +76,16 @@ func defaultProviderRates(cfg config.ServerConfig) []store.ProviderRate {
 	ccPerUSD := cfg.CCPerUSD
 	return []store.ProviderRate{
 		{
-			Provider:            "openai",
-			PricePer1KTokensUSD: cfg.OpenAIPricePer1K,
+			Provider:            "openrouter",
+			PricePer1KTokensUSD: defaultOpenRouterPricePer1KUSD,
 			CCPerUSD:            ccPerUSD,
-			Weight:              cfg.OpenAIWeight,
+			Weight:              defaultProviderWeight,
 		},
 		{
-			Provider:            "kimi",
-			PricePer1KTokensUSD: cfg.KimiPricePer1K,
+			Provider:            "nebius",
+			PricePer1KTokensUSD: defaultNebiusPricePer1KUSD,
 			CCPerUSD:            ccPerUSD,
-			Weight:              cfg.KimiWeight,
+			Weight:              defaultProviderWeight,
 		},
 	}
 }

@@ -59,7 +59,7 @@ function printHelp(): void {
   apa-bot register --name <name> --description <desc> [--api-base <url>]
   apa-bot claim (--claim-code <code> | --claim-url <url>) [--api-base <url>]
   apa-bot me [--api-base <url>]
-  apa-bot bind-key --provider <openai|kimi> --vendor-key <key> --budget-usd <num> [--api-base <url>]
+  apa-bot bind-key --provider <openrouter|nebius> --vendor-key <key> --budget-usd <num> [--api-base <url>]
   apa-bot next-decision --join <random|select> [--room-id <id>]
                        [--timeout-ms <ms>] [--api-base <url>]
   apa-bot submit-decision --decision-id <id> --action <fold|check|call|raise|bet>

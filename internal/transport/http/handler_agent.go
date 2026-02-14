@@ -137,6 +137,8 @@ func (h *AgentHandlers) BindKey() http.HandlerFunc {
 				WriteHTTPError(w, http.StatusConflict, "api_key_already_bound")
 			case errors.Is(err, appagent.ErrInvalidVendorKey):
 				WriteHTTPError(w, http.StatusUnauthorized, "invalid_vendor_key")
+			case errors.Is(err, appagent.ErrInsufficientVendorBalance):
+				WriteHTTPError(w, http.StatusBadRequest, "insufficient_vendor_balance")
 			case errors.Is(err, appagent.ErrAgentBlacklisted):
 				w.WriteHeader(http.StatusForbidden)
 				payload := map[string]any{"error": "agent_blacklisted"}

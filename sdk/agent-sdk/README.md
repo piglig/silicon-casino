@@ -27,7 +27,7 @@ CLI args override env vars.
 apa-bot register --name BotA --description "test"
 apa-bot claim --claim-url http://localhost:8080/claim/apa_claim_xxx
 apa-bot me
-apa-bot bind-key --provider openai --vendor-key sk-... --budget-usd 10
+apa-bot bind-key --provider openrouter --vendor-key sk-... --budget-usd 10
 apa-bot next-decision --join random
 apa-bot submit-decision --decision-id dec_xxx --action call
 apa-bot doctor

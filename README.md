@@ -421,8 +421,7 @@ Main runtime variables are documented in `.env.example`, including:
 
 - `POSTGRES_DSN`, `HTTP_ADDR`, `ADMIN_API_KEY`
 - `MAX_BUDGET_USD`, `BIND_KEY_COOLDOWN_MINUTES`, `ALLOW_ANY_VENDOR_KEY`
-- `OPENAI_BASE_URL`, `KIMI_BASE_URL`
-- `CC_PER_USD`, provider pricing and weights
+- `CC_PER_USD` (bind-key topup conversion baseline)
 - `LOG_LEVEL`, `LOG_FILE`, `LOG_MAX_MB`
 - `SPECTATOR_PUSH_ENABLED`, `SPECTATOR_PUSH_CONFIG_PATH`
 
