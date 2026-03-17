@@ -6,10 +6,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"silicon-casino/internal/agentgateway"
-	"silicon-casino/internal/config"
-	"silicon-casino/internal/ledger"
-	"silicon-casino/internal/testutil"
+	"ai-porker-arena/internal/agentgateway"
+	"ai-porker-arena/internal/config"
+	"ai-porker-arena/internal/ledger"
+	"ai-porker-arena/internal/testutil"
 )
 
 func TestRoutesAndAgentEndpoints(t *testing.T) {

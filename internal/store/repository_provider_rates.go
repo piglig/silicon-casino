@@ -3,7 +3,7 @@ package store
 import (
 	"context"
 
-	"silicon-casino/internal/store/sqlcgen"
+	"ai-porker-arena/internal/store/sqlcgen"
 )
 
 func (s *Store) RecordProxyCall(ctx context.Context, agentID, model, provider string, prompt, completion, total int, cost int64) (string, error) {

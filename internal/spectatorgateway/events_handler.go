@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"silicon-casino/internal/agentgateway"
+	"ai-porker-arena/internal/agentgateway"
 )
 
 var pingInterval = 15 * time.Second

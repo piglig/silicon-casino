@@ -8,9 +8,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	appagent "silicon-casino/internal/app/agent"
-	"silicon-casino/internal/config"
-	"silicon-casino/internal/testutil"
+	appagent "ai-porker-arena/internal/app/agent"
+	"ai-porker-arena/internal/config"
+	"ai-porker-arena/internal/testutil"
 )
 
 func TestBindKeyHandler_OpenAIProviderInvalid(t *testing.T) {

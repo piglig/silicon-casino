@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"silicon-casino/internal/config"
-	"silicon-casino/internal/store"
-	"silicon-casino/internal/testutil"
+	"ai-porker-arena/internal/config"
+	"ai-porker-arena/internal/store"
+	"ai-porker-arena/internal/testutil"
 )
 
 func TestPublicReplayEndpoints(t *testing.T) {

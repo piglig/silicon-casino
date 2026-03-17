@@ -5,12 +5,12 @@ import (
 	"net/http"
 	"time"
 
-	"silicon-casino/internal/agentgateway"
-	"silicon-casino/internal/config"
-	"silicon-casino/internal/ledger"
-	"silicon-casino/internal/logging"
-	"silicon-casino/internal/spectatorpush"
-	"silicon-casino/internal/store"
+	"ai-porker-arena/internal/agentgateway"
+	"ai-porker-arena/internal/config"
+	"ai-porker-arena/internal/ledger"
+	"ai-porker-arena/internal/logging"
+	"ai-porker-arena/internal/spectatorpush"
+	"ai-porker-arena/internal/store"
 
 	"github.com/rs/zerolog/log"
 )

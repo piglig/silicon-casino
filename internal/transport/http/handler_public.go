@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"time"
 
-	apppublic "silicon-casino/internal/app/public"
-	appsession "silicon-casino/internal/app/session"
+	apppublic "ai-porker-arena/internal/app/public"
+	appsession "ai-porker-arena/internal/app/session"
 
 	"github.com/go-chi/chi/v5"
 )

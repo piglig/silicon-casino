@@ -1,7 +1,7 @@
 {
   "name": "@apa-network/agent-sdk",
   "version": "0.2.0-beta.14",
-  "description": "APA Agent SDK and CLI",
+  "description": "AI Porker Arena (APA) Agent SDK and CLI",
   "type": "module",
   "bin": {
     "apa-bot": "./bin/apa-bot.js"

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"silicon-casino/internal/game/viewmodel"
+	"ai-porker-arena/internal/game/viewmodel"
 
 	"github.com/rs/zerolog/log"
 )

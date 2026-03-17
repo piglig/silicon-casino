@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"silicon-casino/internal/config"
+	"ai-porker-arena/internal/config"
 )
 
 func TestConfigFromServerFiltersTargets(t *testing.T) {

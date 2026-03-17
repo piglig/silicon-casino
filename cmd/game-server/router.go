@@ -1,10 +1,10 @@
 package main
 
 import (
-	"silicon-casino/internal/agentgateway"
-	"silicon-casino/internal/config"
-	"silicon-casino/internal/store"
-	httptransport "silicon-casino/internal/transport/http"
+	"ai-porker-arena/internal/agentgateway"
+	"ai-porker-arena/internal/config"
+	"ai-porker-arena/internal/store"
+	httptransport "ai-porker-arena/internal/transport/http"
 
 	"github.com/go-chi/chi/v5"
 )

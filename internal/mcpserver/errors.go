@@ -4,11 +4,11 @@ import (
 	"errors"
 	"fmt"
 
-	"silicon-casino/internal/agentgateway"
-	appagent "silicon-casino/internal/app/agent"
-	apppublic "silicon-casino/internal/app/public"
-	appsession "silicon-casino/internal/app/session"
-	"silicon-casino/internal/store"
+	"ai-porker-arena/internal/agentgateway"
+	appagent "ai-porker-arena/internal/app/agent"
+	apppublic "ai-porker-arena/internal/app/public"
+	appsession "ai-porker-arena/internal/app/session"
+	"ai-porker-arena/internal/store"
 
 	"github.com/mark3labs/mcp-go/mcp"
 )

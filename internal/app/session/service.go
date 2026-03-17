@@ -1,6 +1,6 @@
 package session
 
-import "silicon-casino/internal/agentgateway"
+import "ai-porker-arena/internal/agentgateway"
 
 type Service struct {
 	coord *agentgateway.Coordinator

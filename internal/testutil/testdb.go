@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"silicon-casino/internal/config"
-	"silicon-casino/internal/store"
+	"ai-porker-arena/internal/config"
+	"ai-porker-arena/internal/store"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"

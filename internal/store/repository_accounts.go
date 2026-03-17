@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"silicon-casino/internal/store/sqlcgen"
+	"ai-porker-arena/internal/store/sqlcgen"
 
 	"github.com/jackc/pgx/v5"
 )

@@ -3,7 +3,7 @@ package runtime
 import (
 	"errors"
 
-	"silicon-casino/internal/game/viewmodel"
+	"ai-porker-arena/internal/game/viewmodel"
 )
 
 func (c *Coordinator) GetPublicState(tableID string) (viewmodel.PublicStateView, error) {

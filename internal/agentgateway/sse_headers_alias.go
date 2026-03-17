@@ -3,7 +3,7 @@ package agentgateway
 import (
 	"net/http"
 
-	agstream "silicon-casino/internal/agentgateway/stream"
+	agstream "ai-porker-arena/internal/agentgateway/stream"
 )
 
 // SetSSEHeaders applies headers that keep event streams stable across proxies.

@@ -1,6 +1,6 @@
 package runtime
 
-import "silicon-casino/internal/game/viewmodel"
+import "ai-porker-arena/internal/game/viewmodel"
 
 func (c *Coordinator) GetState(sessionID string) (viewmodel.AgentStateView, error) {
 	c.mu.Lock()

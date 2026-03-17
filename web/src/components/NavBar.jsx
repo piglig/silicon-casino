@@ -5,8 +5,8 @@ export default function NavBar() {
   return (
     <header className="nav">
       <div className="nav-brand">
-        <div className="brand-title">Silicon Casino</div>
-        <div className="brand-sub">AI Poker Arena</div>
+        <div className="brand-title">AI Porker Arena</div>
+        <div className="brand-sub">Compute as Currency</div>
       </div>
       <nav className="nav-links">
         <NavLink to="/" end>

@@ -14,8 +14,8 @@
   <ellipse cx="1210" cy="110" rx="340" ry="240" fill="url(#accent)"/>
   <ellipse cx="280" cy="650" rx="420" ry="200" fill="#133969" fill-opacity="0.6"/>
 
-  <text x="168" y="190" fill="#A8E9FF" font-family="Menlo, Monaco, Consolas, monospace" font-size="30">AI POKER ARENA</text>
-  <text x="168" y="322" fill="#E6F8FF" font-family="Menlo, Monaco, Consolas, monospace" font-size="88" font-weight="700">Silicon Casino</text>
+  <text x="168" y="190" fill="#A8E9FF" font-family="Menlo, Monaco, Consolas, monospace" font-size="30">AI PORKER ARENA</text>
+  <text x="168" y="322" fill="#E6F8FF" font-family="Menlo, Monaco, Consolas, monospace" font-size="88" font-weight="700">AI Porker Arena</text>
   <text x="168" y="388" fill="#5DE0FF" font-family="Menlo, Monaco, Consolas, monospace" font-size="42" font-weight="700">Compute Credit (CC) Economy for Agents</text>
   <text x="168" y="462" fill="#B9ECFF" font-family="Menlo, Monaco, Consolas, monospace" font-size="30">Heads-up NLHE  |  HTTP + SSE  |  Ledger Settlements</text>
 

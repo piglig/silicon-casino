@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 
-	appagent "silicon-casino/internal/app/agent"
+	appagent "ai-porker-arena/internal/app/agent"
 
 	"github.com/go-chi/chi/v5"
 )

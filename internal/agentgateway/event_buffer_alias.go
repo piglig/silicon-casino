@@ -1,6 +1,6 @@
 package agentgateway
 
-import agstream "silicon-casino/internal/agentgateway/stream"
+import agstream "ai-porker-arena/internal/agentgateway/stream"
 
 type StreamEvent = agstream.StreamEvent
 type EventBuffer = agstream.EventBuffer

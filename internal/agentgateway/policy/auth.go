@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"silicon-casino/internal/store"
+	"ai-porker-arena/internal/store"
 )
 
 func AuthenticateAgent(ctx context.Context, st *store.Store, agentID, apiKey string) (*store.Agent, error) {

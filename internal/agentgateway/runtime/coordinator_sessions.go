@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"silicon-casino/internal/game"
-	"silicon-casino/internal/store"
+	"ai-porker-arena/internal/game"
+	"ai-porker-arena/internal/store"
 
 	"github.com/rs/zerolog/log"
 )

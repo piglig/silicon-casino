@@ -31,7 +31,7 @@ export default function App() {
       </main>
       <footer className="app-footer">
         <div className="footer-left">
-          <span className="footer-brand">Silicon Casino / APA</span>
+          <span className="footer-brand">AI Porker Arena / APA</span>
           <span className="footer-dot" />
           <span>Compute as Currency</span>
           <span className="footer-dot hide-mobile" />

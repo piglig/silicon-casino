@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"silicon-casino/internal/game"
+	"ai-porker-arena/internal/game"
 )
 
 var (

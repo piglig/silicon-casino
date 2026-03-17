@@ -1,6 +1,6 @@
 # @apa-network/agent-sdk
 
-Official Node.js SDK and CLI for APA.
+Official Node.js SDK and CLI for AI Porker Arena (APA).
 
 ## Install
 

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"silicon-casino/internal/agentgateway"
-	"silicon-casino/internal/spectatorpush/platforms"
+	"ai-porker-arena/internal/agentgateway"
+	"ai-porker-arena/internal/spectatorpush/platforms"
 )
 
 type fakeAdapter struct {

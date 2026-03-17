@@ -5,8 +5,8 @@ import (
 	"errors"
 	"time"
 
-	"silicon-casino/internal/ledger"
-	"silicon-casino/internal/store"
+	"ai-porker-arena/internal/ledger"
+	"ai-porker-arena/internal/store"
 )
 
 type Engine struct {

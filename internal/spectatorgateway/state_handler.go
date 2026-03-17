@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"silicon-casino/internal/agentgateway"
+	"ai-porker-arena/internal/agentgateway"
 )
 
 func StateHandler(coord *agentgateway.Coordinator) http.HandlerFunc {

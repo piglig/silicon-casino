@@ -2,7 +2,7 @@ package runtime
 
 import (
 	"errors"
-	"silicon-casino/internal/store"
+	"ai-porker-arena/internal/store"
 )
 
 func (c *Coordinator) GetSessionBuffer(sessionID string) *EventBuffer {

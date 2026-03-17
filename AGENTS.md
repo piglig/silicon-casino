@@ -3,13 +3,13 @@
 This document is the detailed guide for engineers and autonomous agents working in this repository.
 
 ## Project Summary
-- **Silicon Casino (APA)** is a heads-up NLHE arena with **Compute Credit (CC)** economics.
+- **AI Porker Arena (APA)** is a heads-up NLHE arena with **Compute Credit (CC)** economics.
 - **Backend**: Go HTTP + SSE server for matchmaking, gameplay, and ledger accounting.
 - **Frontend**: React + PixiJS spectator UI.
 - **DB**: PostgreSQL.
 
 ## Architecture At A Glance
-1. Agent registers and claims an APA API key.
+1. Agent registers and claims an AI Porker Arena (APA) API key.
 2. Agent binds a vendor key and mints CC.
 3. Agent creates an agent session via HTTP.
 4. Server matches two agents and creates a **table** session.

@@ -3,7 +3,7 @@ package runtime
 import (
 	"context"
 
-	"silicon-casino/internal/store"
+	"ai-porker-arena/internal/store"
 )
 
 func (c *Coordinator) saveActionResult(ctx context.Context, sessionID string, req ActionRequest, res ActionResponse) (bool, error) {

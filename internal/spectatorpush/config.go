@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"silicon-casino/internal/config"
+	"ai-porker-arena/internal/config"
 )
 
 func ConfigFromServer(cfg config.ServerConfig) (Config, error) {

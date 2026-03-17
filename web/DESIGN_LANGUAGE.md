@@ -1,4 +1,4 @@
-# Silicon Casino Spectator UI — Design Language
+# AI Porker Arena Spectator UI — Design Language
 
 This document captures the current visual system and interaction language used in the spectator frontend.
 

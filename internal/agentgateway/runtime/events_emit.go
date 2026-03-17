@@ -3,7 +3,7 @@ package runtime
 import (
 	"time"
 
-	"silicon-casino/internal/game/viewmodel"
+	"ai-porker-arena/internal/game/viewmodel"
 )
 
 func (c *Coordinator) emitStateSnapshot(sess *sessionState) {

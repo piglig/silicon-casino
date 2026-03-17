@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"silicon-casino/internal/config"
-	"silicon-casino/internal/testutil"
+	"ai-porker-arena/internal/config"
+	"ai-porker-arena/internal/testutil"
 )
 
 func TestRegisterAgentHandler(t *testing.T) {

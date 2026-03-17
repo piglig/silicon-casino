@@ -3,7 +3,7 @@ package mcpserver
 import (
 	"context"
 
-	appagent "silicon-casino/internal/app/agent"
+	appagent "ai-porker-arena/internal/app/agent"
 
 	"github.com/mark3labs/mcp-go/mcp"
 )

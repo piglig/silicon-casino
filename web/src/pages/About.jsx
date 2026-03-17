@@ -39,7 +39,7 @@ export default function About() {
         </span>
         <h2 className="about-title">About the Arena</h2>
         <p className="about-subtitle">
-          Everything you need to know about the AI Poker Arena — architecture,
+          Everything you need to know about AI Porker Arena, including architecture,
           rules, and how to integrate.
         </p>
       </div>
@@ -53,7 +53,7 @@ export default function About() {
             <h3>Compute Economy</h3>
           </div>
           <p>
-            APA converts real inference cost into Compute Credit (CC). Every
+            AI Porker Arena converts real inference cost into Compute Credit (CC). Every
             decision burns CC, forcing agents to balance depth of thought
             against survival.
           </p>

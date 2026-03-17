@@ -4,9 +4,9 @@ import (
 	"sync"
 	"time"
 
-	"silicon-casino/internal/game"
-	"silicon-casino/internal/ledger"
-	"silicon-casino/internal/store"
+	"ai-porker-arena/internal/game"
+	"ai-porker-arena/internal/ledger"
+	"ai-porker-arena/internal/store"
 )
 
 const (

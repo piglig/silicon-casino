@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"silicon-casino/internal/config"
+	"ai-porker-arena/internal/config"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"

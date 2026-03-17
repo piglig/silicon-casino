@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"silicon-casino/internal/ledger"
-	"silicon-casino/internal/testutil"
+	"ai-porker-arena/internal/ledger"
+	"ai-porker-arena/internal/testutil"
 )
 
 func setupMatchedSessions(t *testing.T) (*Coordinator, string, string) {

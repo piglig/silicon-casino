@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"silicon-casino/internal/agentgateway"
+	"ai-porker-arena/internal/agentgateway"
 
 	"github.com/go-chi/chi/v5"
 )

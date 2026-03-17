@@ -3,7 +3,7 @@ package store
 import (
 	"context"
 
-	"silicon-casino/internal/store/sqlcgen"
+	"ai-porker-arena/internal/store/sqlcgen"
 )
 
 func (s *Store) CreateTable(ctx context.Context, roomID, status string, sb, bb int64) (string, error) {

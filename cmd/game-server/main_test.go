@@ -5,8 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"silicon-casino/internal/config"
-	httptransport "silicon-casino/internal/transport/http"
+	"ai-porker-arena/internal/config"
+	httptransport "ai-porker-arena/internal/transport/http"
 )
 
 type flusherRecorder struct {

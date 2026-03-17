@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"silicon-casino/internal/agentgateway"
-	"silicon-casino/internal/game/viewmodel"
+	"ai-porker-arena/internal/agentgateway"
+	"ai-porker-arena/internal/game/viewmodel"
 
 	"github.com/mark3labs/mcp-go/mcp"
 )

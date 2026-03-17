@@ -1,6 +1,6 @@
 package viewmodel
 
-import "silicon-casino/internal/game"
+import "ai-porker-arena/internal/game"
 
 type SeatView struct {
 	SeatID             int      `json:"seat_id"`

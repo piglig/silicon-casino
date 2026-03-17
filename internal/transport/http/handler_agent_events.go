@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"silicon-casino/internal/agentgateway"
+	"ai-porker-arena/internal/agentgateway"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"

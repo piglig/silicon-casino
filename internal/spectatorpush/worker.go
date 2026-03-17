@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"silicon-casino/internal/spectatorpush/platforms"
+	"ai-porker-arena/internal/spectatorpush/platforms"
 )
 
 var errCircuitOpen = errors.New("circuit_open")

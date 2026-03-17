@@ -7,9 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"silicon-casino/internal/agentgateway"
-	"silicon-casino/internal/ledger"
-	"silicon-casino/internal/testutil"
+	"ai-porker-arena/internal/agentgateway"
+	"ai-porker-arena/internal/ledger"
+	"ai-porker-arena/internal/testutil"
 )
 
 func setupCoordWithTable(t *testing.T) (*agentgateway.Coordinator, string) {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"silicon-casino/internal/agentgateway"
+	"ai-porker-arena/internal/agentgateway"
 )
 
 type PushManager interface {

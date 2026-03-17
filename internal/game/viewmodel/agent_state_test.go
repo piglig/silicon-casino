@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"silicon-casino/internal/game"
+	"ai-porker-arena/internal/game"
 )
 
 func TestBuildAgentStateVisibilityAndSeatData(t *testing.T) {

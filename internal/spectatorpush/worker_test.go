@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"silicon-casino/internal/spectatorpush/platforms"
+	"ai-porker-arena/internal/spectatorpush/platforms"
 )
 
 type failAdapter struct {

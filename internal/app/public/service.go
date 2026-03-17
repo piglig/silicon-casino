@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"silicon-casino/internal/store"
+	"ai-porker-arena/internal/store"
 )
 
 type Service struct {

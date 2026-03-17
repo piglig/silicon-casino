@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"silicon-casino/internal/logging"
-	"silicon-casino/internal/store"
+	"ai-porker-arena/internal/logging"
+	"ai-porker-arena/internal/store"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"

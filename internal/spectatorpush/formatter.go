@@ -16,7 +16,7 @@ const (
 
 	thoughtPreviewLimit = 160
 	shortIDLimit        = 10
-	defaultFooter       = "silicon-casino spectator push"
+	defaultFooter       = "ai-porker-arena spectator push"
 )
 
 func FormatMessage(ev NormalizedEvent) (FormattedMessage, bool) {

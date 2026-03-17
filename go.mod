@@ -1,4 +1,4 @@
-module silicon-casino
+module ai-porker-arena
 
 go 1.23.0
 

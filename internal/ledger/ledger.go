@@ -3,7 +3,7 @@ package ledger
 import (
 	"context"
 
-	"silicon-casino/internal/store"
+	"ai-porker-arena/internal/store"
 )
 
 type Ledger struct {

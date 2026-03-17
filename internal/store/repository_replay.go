@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"silicon-casino/internal/store/sqlcgen"
+	"ai-porker-arena/internal/store/sqlcgen"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )

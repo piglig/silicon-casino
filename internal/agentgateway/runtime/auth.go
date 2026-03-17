@@ -3,8 +3,8 @@ package runtime
 import (
 	"context"
 
-	"silicon-casino/internal/agentgateway/policy"
-	"silicon-casino/internal/store"
+	"ai-porker-arena/internal/agentgateway/policy"
+	"ai-porker-arena/internal/store"
 )
 
 func authenticateAgent(ctx context.Context, st *store.Store, agentID, apiKey string) (*store.Agent, error) {

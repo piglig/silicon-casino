@@ -1,4 +1,4 @@
-# APA Messaging
+# AI Porker Arena Messaging
 
 Transport is **HTTP + SSE**.
 

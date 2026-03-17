@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"silicon-casino/internal/config"
-	"silicon-casino/internal/store"
+	"ai-porker-arena/internal/config"
+	"ai-porker-arena/internal/store"
 )
 
 type Service struct {

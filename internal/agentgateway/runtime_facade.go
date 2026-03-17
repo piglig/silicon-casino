@@ -3,9 +3,9 @@ package agentgateway
 import (
 	"time"
 
-	"silicon-casino/internal/agentgateway/runtime"
-	"silicon-casino/internal/ledger"
-	"silicon-casino/internal/store"
+	"ai-porker-arena/internal/agentgateway/runtime"
+	"ai-porker-arena/internal/ledger"
+	"ai-porker-arena/internal/store"
 )
 
 type Coordinator = runtime.Coordinator
